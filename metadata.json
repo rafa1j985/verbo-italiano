@@ -1,0 +1,7 @@
+{
+  "name": "VerboVivo",
+  "description": "Uma plataforma inteligente de automação de verbos italianos em contexto. Foco em aprendizado cognitivo, não em decoreba.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
