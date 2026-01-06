@@ -45,7 +45,8 @@ const VoiceEnergyMonitor: React.FC<{ onEnergyFull: () => void }> = ({ onEnergyFu
     const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-    const requestRef = useRef<number>();
+    // Fix: Provide an initial value to useRef to satisfy the expected 1 argument for the hook.
+    const requestRef = useRef<number | undefined>(undefined);
     const streamRef = useRef<MediaStream | null>(null);
 
     const toggleMic = async () => {

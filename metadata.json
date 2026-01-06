@@ -1,6 +1,6 @@
 {
   "name": "VerboVivo",
-  "description": "Uma plataforma inteligente de automação de verbos italianos em contexto. Foco em aprendizado cognitivo, não em decoreba.",
+  "description": "Automação cognitiva de verbos italianos. Foco em fluência natural, 400 verbos e 15 marcos de progresso. Sincronizado com Supabase.",
   "requestFramePermissions": [
     "microphone"
   ]
