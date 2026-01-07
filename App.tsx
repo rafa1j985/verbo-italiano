@@ -10,7 +10,7 @@ import BossFightSession from './components/BossFightSession';
 import StoryModeSession from './components/StoryModeSession'; 
 import MilestoneSession from './components/MilestoneSession';
 import IlMercato from './components/IlMercato';
-import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2, Lock } from 'lucide-react';
+import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2, Lock, WifiOff, RefreshCcw, Cloud, CloudOff, CheckCircle } from 'lucide-react';
 import { STORE_CATALOG } from './data/storeItems';
 
 // CRITICAL FIX: Changed from constant object to a Factory Function.
@@ -86,12 +86,15 @@ const DEFAULT_GAME_CONFIG: GlobalGameConfig = {
 };
 
 type AuthMode = 'LOGIN' | 'REGISTER';
+type SaveStatus = 'IDLE' | 'SAVING' | 'SUCCESS' | 'ERROR';
 
 const App: React.FC = () => {
   // Session State
   const [session, setSession] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('IDLE');
   
   // App State
   const [userName, setUserName] = useState<string>('');
@@ -131,6 +134,8 @@ const App: React.FC = () => {
          setUserName('');
          setView('DASHBOARD');
          setFormData({ name: '', email: '', password: '' }); // Clear form
+         setLoadError(null);
+         setSaveStatus('IDLE');
       }
     });
 
@@ -140,53 +145,74 @@ const App: React.FC = () => {
   // --- DATA LOADING ---
   const loadUserData = async (userId: string) => {
       setDataLoading(true);
+      setLoadError(null);
       
-      // 1. Get current user email directly from auth to verify identity for Master Access
-      const { data: { user } } = await supabase.auth.getUser();
-      const userEmail = user?.email;
+      try {
+          // 1. Get current user email directly from auth to verify identity for Master Access
+          const { data: { user } } = await supabase.auth.getUser();
+          const userEmail = user?.email;
 
-      // 2. Load Profile (Role, Name) from DB
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      
-      // 3. Determine Role (Force Admin for specific email, otherwise use DB)
-      if (userEmail === 'rafaelvollpilates@gmail.com') {
-          // MASTER OVERRIDE: Force Admin for this specific email
-          setRole(UserRole.ADMIN);
-          setUserName(profile?.full_name || 'Master Admin');
-      } else {
-          // Standard Logic for everyone else
-          if (profile) {
-              setUserName(profile.full_name || 'Estudante');
-              setRole(profile.role === 'ADMIN' ? UserRole.ADMIN : UserRole.STUDENT);
+          // 2. Load Profile (Role, Name) from DB
+          const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', userId).single();
+          
+          // 3. Determine Role (Force Admin for specific email, otherwise use DB)
+          if (userEmail === 'rafaelvollpilates@gmail.com') {
+              // MASTER OVERRIDE: Force Admin for this specific email
+              setRole(UserRole.ADMIN);
+              setUserName(profile?.full_name || 'Master Admin');
           } else {
-              setRole(UserRole.STUDENT);
+              // Standard Logic for everyone else
+              if (profile) {
+                  setUserName(profile.full_name || 'Estudante');
+                  setRole(profile.role === 'ADMIN' ? UserRole.ADMIN : UserRole.STUDENT);
+              } else {
+                  setRole(UserRole.STUDENT);
+              }
           }
-      }
 
-      // 4. Load Brain (Progress)
-      const savedBrain = await loadUserProgress(userId);
-      if (savedBrain) {
-          // Merge with initial to ensure new structure fields exist
-          setBrain({ ...getInitialBrain(), ...savedBrain });
-      } else {
-          setBrain(getInitialBrain()); // Ensure clean slate if new user
-      }
+          // 4. Load Brain (Progress)
+          // IMPORTANT: If this throws an error, it goes to catch block.
+          const savedBrain = await loadUserProgress(userId);
+          
+          if (savedBrain) {
+              // Merge with initial to ensure new structure fields exist
+              setBrain({ ...getInitialBrain(), ...savedBrain });
+          } else {
+              // If null returned (no row), it's a new user. 
+              // We use initial brain (already set in state, but safe to set again).
+              setBrain(getInitialBrain()); 
+          }
 
-      // 5. Load Global Config (Only 1 round trip)
-      const savedConfig = await getGlobalConfig();
-      if (savedConfig) {
-          setGameConfig(savedConfig);
-      }
+          // 5. Load Global Config (Only 1 round trip)
+          const savedConfig = await getGlobalConfig();
+          if (savedConfig) {
+              setGameConfig(savedConfig);
+          }
 
-      setDataLoading(false);
+      } catch (error: any) {
+          console.error("FATAL LOAD ERROR:", error);
+          setLoadError("Falha na sincronização com a nuvem. Verifique sua conexão.");
+      } finally {
+          setDataLoading(false);
+      }
   };
 
   // --- BRAIN UPDATE WRAPPER ---
-  const handleUpdateBrain = (newBrain: UserBrain) => {
+  const handleUpdateBrain = async (newBrain: UserBrain) => {
       setBrain(newBrain);
-      if (session?.user?.id) {
-          // Auto-save to Supabase
-          saveUserProgress(session.user.id, newBrain);
+      if (session?.user?.id && !loadError) {
+          // Auto-save to Supabase with Status Indicator
+          setSaveStatus('SAVING');
+          const success = await saveUserProgress(session.user.id, newBrain);
+          
+          if (success) {
+              setSaveStatus('SUCCESS');
+              setTimeout(() => setSaveStatus('IDLE'), 2000);
+          } else {
+              setSaveStatus('ERROR');
+          }
+      } else {
+          console.warn("Skipping cloud save: Not logged in or Load Error present.");
       }
   };
 
@@ -257,6 +283,34 @@ const App: React.FC = () => {
           <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white gap-4">
               <Loader2 className="animate-spin text-emerald-500" size={48} />
               <p className="animate-pulse font-serif">Sincronizando banco de dados neural...</p>
+          </div>
+      );
+  }
+
+  // --- RENDER: ERROR SCREEN (DATA PROTECTION) ---
+  if (session && loadError) {
+      return (
+          <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 text-center">
+              <div className="bg-red-500/10 p-6 rounded-full mb-6">
+                  <WifiOff className="text-red-500" size={48} />
+              </div>
+              <h2 className="text-2xl font-bold mb-2">Erro de Sincronização</h2>
+              <p className="text-slate-400 mb-8 max-w-md">
+                  Não foi possível baixar seu progresso da nuvem. 
+                  Para proteger seus dados de serem sobrescritos por um perfil vazio, o aplicativo foi pausado.
+              </p>
+              <button 
+                  onClick={() => loadUserData(session.user.id)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors"
+              >
+                  <RefreshCcw size={20} /> Tentar Novamente
+              </button>
+              <button 
+                  onClick={handleLogout}
+                  className="mt-4 text-slate-500 hover:text-white text-sm underline"
+              >
+                  Sair da Conta
+              </button>
           </div>
       );
   }
@@ -393,6 +447,14 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            {/* --- CLOUD SYNC INDICATOR --- */}
+            <div className="hidden sm:flex items-center gap-2 px-2" title={saveStatus === 'ERROR' ? "Erro ao salvar. Verifique se as tabelas foram criadas no Supabase." : "Status da Nuvem"}>
+                {saveStatus === 'SAVING' && <RefreshCcw size={16} className="text-amber-500 animate-spin" />}
+                {saveStatus === 'SUCCESS' && <CheckCircle size={16} className="text-emerald-500" />}
+                {saveStatus === 'ERROR' && <CloudOff size={16} className="text-red-500 animate-pulse" />}
+                {saveStatus === 'IDLE' && <Cloud size={16} className="text-slate-400 opacity-50" />}
+            </div>
+
             {role === UserRole.STUDENT && (
                <button 
                 onClick={() => setView(view === 'DASHBOARD' ? 'SESSION' : 'DASHBOARD')}

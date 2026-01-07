@@ -4,18 +4,28 @@ import { UserBrain, GlobalGameConfig } from '../types';
 
 // --- USER PROGRESS (BRAIN) ---
 
-export const saveUserProgress = async (userId: string, brain: UserBrain) => {
-  if (!userId) return;
+export const saveUserProgress = async (userId: string, brain: UserBrain): Promise<boolean> => {
+  if (!userId) return false;
   
-  const { error } = await supabase
+  // Explicitly specifying onConflict ensures we update the existing row for this user
+  // Using 'id' as the column name to match auth.users reference standard
+  const { data, error } = await supabase
     .from('user_progress')
-    .upsert({ 
-      user_id: userId, 
-      brain_data: brain,
-      updated_at: new Date().toISOString()
-    });
+    .upsert(
+      { 
+        id: userId, 
+        brain_data: brain,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: 'id' }
+    );
 
-  if (error) console.error("Error saving progress:", error);
+  if (error) {
+      console.error("CRITICAL: Error saving progress to cloud:", error.message);
+      return false;
+  } else {
+      return true;
+  }
 };
 
 export const loadUserProgress = async (userId: string): Promise<UserBrain | null> => {
@@ -24,12 +34,13 @@ export const loadUserProgress = async (userId: string): Promise<UserBrain | null
   const { data, error } = await supabase
     .from('user_progress')
     .select('brain_data')
-    .eq('user_id', userId)
-    .single();
+    .eq('id', userId)
+    .maybeSingle(); // maybeSingle is safer than single() for optional rows
 
   if (error) {
-    // It's normal to have no data for a new user
-    return null;
+    // Check if it's a real error or just "no row found" (which implies new user)
+    console.error("CRITICAL: Error loading progress from cloud:", error.message);
+    throw new Error(error.message); 
   }
   
   return data?.brain_data || null;
@@ -53,7 +64,7 @@ export const getAllUsersAdmin = async () => {
   // Fetch progress for all users (Admin only)
   const { data: progressData, error: progressError } = await supabase
     .from('user_progress')
-    .select('user_id, brain_data');
+    .select('id, brain_data');
 
   if (progressError) {
       console.error("Error fetching progress:", progressError);
@@ -62,7 +73,7 @@ export const getAllUsersAdmin = async () => {
 
   // Merge Data
   return profiles.map(profile => {
-      const prog = progressData.find(p => p.user_id === profile.id);
+      const prog = progressData.find(p => p.id === profile.id);
       return {
           ...profile,
           brain: prog?.brain_data || null
