@@ -141,27 +141,38 @@ const App: React.FC = () => {
   const loadUserData = async (userId: string) => {
       setDataLoading(true);
       
-      // 1. Load Profile (Role, Name)
+      // 1. Get current user email directly from auth to verify identity for Master Access
+      const { data: { user } } = await supabase.auth.getUser();
+      const userEmail = user?.email;
+
+      // 2. Load Profile (Role, Name) from DB
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (profile) {
-          setUserName(profile.full_name || 'Estudante');
-          setRole(profile.role === 'ADMIN' ? UserRole.ADMIN : UserRole.STUDENT);
+      
+      // 3. Determine Role (Force Admin for specific email, otherwise use DB)
+      if (userEmail === 'rafaelvollpilates@gmail.com') {
+          // MASTER OVERRIDE: Force Admin for this specific email
+          setRole(UserRole.ADMIN);
+          setUserName(profile?.full_name || 'Master Admin');
       } else {
-          // If profile doesn't exist yet (latency), default to student
-          setRole(UserRole.STUDENT);
+          // Standard Logic for everyone else
+          if (profile) {
+              setUserName(profile.full_name || 'Estudante');
+              setRole(profile.role === 'ADMIN' ? UserRole.ADMIN : UserRole.STUDENT);
+          } else {
+              setRole(UserRole.STUDENT);
+          }
       }
 
-      // 2. Load Brain (Progress)
+      // 4. Load Brain (Progress)
       const savedBrain = await loadUserProgress(userId);
       if (savedBrain) {
           // Merge with initial to ensure new structure fields exist
-          // We spread getInitialBrain() first to ensure we have the base structure, then overwrite with saved data
           setBrain({ ...getInitialBrain(), ...savedBrain });
       } else {
           setBrain(getInitialBrain()); // Ensure clean slate if new user
       }
 
-      // 3. Load Global Config (Only 1 round trip)
+      // 5. Load Global Config (Only 1 round trip)
       const savedConfig = await getGlobalConfig();
       if (savedConfig) {
           setGameConfig(savedConfig);
