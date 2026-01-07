@@ -12,7 +12,21 @@ const modelName = "gemini-3-flash-preview";
 const ttsModelName = "gemini-2.5-flash-preview-tts";
 const imageModelName = "imagen-3.0-generate-001"; 
 
-// --- AUDIO / TTS LOGIC (REBUILT) ---
+// --- HELPER: CLEAN JSON (ROBUST) ---
+const cleanJSON = (text: string): string => {
+    if (!text) return "{}";
+    // Regex insensitive to handle ```JSON or ```json
+    let cleaned = text.replace(/```json/gi, "").replace(/```/g, "");
+    // Find the first '{' and last '}' to strip any preamble/postscript
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
+    return cleaned.trim();
+};
+
+// --- AUDIO / TTS LOGIC (HARDENED FOR VERCEL/PROD) ---
 let audioContext: AudioContext | null = null;
 const BASE64_CACHE: Record<string, string> = {}; // Cache raw strings to prevent re-fetching
 
@@ -20,28 +34,31 @@ const BASE64_CACHE: Record<string, string> = {}; // Cache raw strings to prevent
 const playNativeFallback = (text: string) => {
     console.warn("Using Native TTS Fallback for:", text);
     try {
-        window.speechSynthesis.cancel(); // Stop any current speech
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'it-IT';
-        utterance.rate = 0.9; // Slightly slower for clarity
+        window.speechSynthesis.cancel(); // Critical: Stop any pending speech
         
-        // Try to pick a Google or quality voice if available
-        const voices = window.speechSynthesis.getVoices();
-        const itVoice = voices.find(v => v.lang.includes('it') && v.name.includes('Google')) || 
-                        voices.find(v => v.lang.includes('it'));
-        if (itVoice) utterance.voice = itVoice;
+        // Short delay to allow cancellation to take effect
+        setTimeout(() => {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'it-IT';
+            utterance.rate = 0.9;
+            utterance.volume = 1.0;
+            
+            // Try to force a good voice
+            const voices = window.speechSynthesis.getVoices();
+            const itVoice = voices.find(v => v.lang.includes('it') && !v.name.includes('Google')) || 
+                            voices.find(v => v.lang.includes('it')); // Prefer native OS voices over Google sometimes on mobile
+            if (itVoice) utterance.voice = itVoice;
 
-        window.speechSynthesis.speak(utterance);
+            window.speechSynthesis.speak(utterance);
+        }, 50);
     } catch (e) {
         console.error("Native TTS completely failed:", e);
     }
 };
 
-// 2. Audio Context Singleton
+// 2. Audio Context Singleton with Resume Logic
 async function getAudioContext(): Promise<AudioContext> {
     if (!audioContext) {
-        // Create context without forcing sampleRate (let browser decide hardware default)
-        // This fixes the silence issue on devices where 24kHz is not supported natively
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     if (audioContext.state === 'suspended') {
@@ -50,9 +67,17 @@ async function getAudioContext(): Promise<AudioContext> {
     return audioContext;
 }
 
-// 3. Helper: Base64 -> ArrayBuffer
+// 3. Helper: Base64 -> ArrayBuffer (Padding Fix)
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binaryString = window.atob(base64);
+    // 1. Remove whitespace
+    let cleanBase64 = base64.replace(/\s/g, '');
+    
+    // 2. Add padding if missing (Critical for Vercel/Strict environments)
+    while (cleanBase64.length % 4 !== 0) {
+        cleanBase64 += '=';
+    }
+
+    const binaryString = window.atob(cleanBase64);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -109,8 +134,6 @@ export const playTextToSpeech = async (text: string) => {
         }
 
         // DECODE & PLAY
-        // decodeAudioData handles WAV/MP3 headers automatically.
-        // This is the CRITICAL FIX for the silence issue.
         const audioBuffer = await ctx.decodeAudioData(base64ToArrayBuffer(base64Audio));
 
         const source = ctx.createBufferSource();
@@ -124,7 +147,7 @@ export const playTextToSpeech = async (text: string) => {
     }
 };
 
-// ... (STANDARD GENERATORS BELOW - Unchanged Logic, Just Re-exporting) ...
+// ... (STANDARD GENERATORS BELOW) ...
 
 export const generateLesson = async (
     level: string, 
@@ -180,7 +203,7 @@ const generateLessonAI = async (verb: string, level: string, tense: string): Pro
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("No text");
-        return JSON.parse(text);
+        return JSON.parse(cleanJSON(text));
     } catch (e) {
         return generateLocalLesson(VERB_DATABASE.find(v => v.infinitive === verb) || VERB_DATABASE[0])!;
     }
@@ -197,7 +220,7 @@ export const analyzeSubmission = async (context: string, verb: string, expected:
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+        return JSON.parse(cleanJSON(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}"));
     } catch (e) {
         return { isCorrect: false, userAnswer: user, correctAnswer: expected, errorCategory: ErrorCategory.CONJUGATION, explanation: "Resposta incorreta." };
     }
@@ -214,20 +237,33 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "null");
+        return JSON.parse(cleanJSON(result.candidates?.[0]?.content?.parts?.[0]?.text || "null"));
     } catch (e) { return null; }
 };
 
 export const generateStory = async (targetVerbs: string[], level: string) => {
-    const prompt = `Write short Italian story level ${level} using: ${targetVerbs.join(", ")}. Provide PT translation. JSON: { "title": "...", "storyText": "...", "translation": "..." }`;
+    // STRICT JSON PROMPT
+    const prompt = `You are a Strict JSON Generator. Create a short Italian story (Level ${level}) using: ${targetVerbs.join(", ")}. 
+    Output strictly VALID JSON. Do not wrap in markdown.
+    JSON Structure: { "title": "Italian Title", "storyText": "HTML formatted text with <b>verbs</b> bolded", "translation": "Portuguese translation" }`;
+    
     try {
         const result = await ai.models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json" }
+            config: { 
+                responseMimeType: "application/json",
+                temperature: 0.7 
+            }
         });
-        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "null");
-    } catch (e) { return null; }
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        console.log("Raw Story Response:", text); // Debug log
+        if(!text) return null;
+        return JSON.parse(cleanJSON(text));
+    } catch (e) { 
+        console.error("Story Generation Failed:", e);
+        return null; 
+    }
 };
 
 export const generateMilestoneExam = async (allVerbs: string[], tier: number): Promise<MilestoneExam | null> => {
@@ -238,7 +274,7 @@ export const generateMilestoneExam = async (allVerbs: string[], tier: number): P
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "null");
+        return JSON.parse(cleanJSON(result.candidates?.[0]?.content?.parts?.[0]?.text || "null"));
     } catch (e) { return null; }
 };
 
@@ -250,7 +286,7 @@ export const generateStoreItemIdea = async (category: string, priceRange: string
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "null");
+        return JSON.parse(cleanJSON(result.candidates?.[0]?.content?.parts?.[0]?.text || "null"));
     } catch (e) { return null; }
 };
 

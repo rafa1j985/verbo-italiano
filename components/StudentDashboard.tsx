@@ -318,7 +318,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
             </div>
         </div>
 
-        {/* Card: STORY MODE */}
+        {/* Card: STORY MODE (FIXED FONT SIZE ISSUE) */}
         <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between relative overflow-hidden transition-all
             ${isStoryReady ? 'bg-purple-600 border-purple-700 text-white cursor-pointer hover:scale-[1.02]' : 'bg-white border-slate-200'}
         `}
@@ -327,7 +327,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
             <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
                     <h2 className={`text-xs font-bold uppercase tracking-wide ${isStoryReady ? 'text-purple-100' : 'text-slate-500'}`}>Story Mode</h2>
-                    <div className={`text-3xl font-serif font-bold mt-1 ${isStoryReady ? 'text-white' : 'text-slate-800'}`}>
+                    <div className={`font-serif font-bold mt-1 ${isStoryReady ? 'text-white text-lg tracking-wider' : 'text-slate-800 text-3xl'}`}>
                         {isStoryReady ? 'DESBLOQUEADO' : `${verbsSinceStory} / ${STORY_UNLOCK_COUNT}`} 
                         {!isStoryReady && <span className="text-base text-slate-400 font-sans font-normal"> Verbos</span>}
                     </div>
