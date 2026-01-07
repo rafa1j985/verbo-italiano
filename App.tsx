@@ -10,7 +10,7 @@ import BossFightSession from './components/BossFightSession';
 import StoryModeSession from './components/StoryModeSession'; 
 import MilestoneSession from './components/MilestoneSession';
 import IlMercato from './components/IlMercato';
-import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2 } from 'lucide-react';
+import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2, Lock } from 'lucide-react';
 import { STORE_CATALOG } from './data/storeItems';
 
 const INITIAL_BRAIN: UserBrain = {
@@ -186,7 +186,7 @@ const App: React.FC = () => {
 
     try {
         if (authMode === 'REGISTER') {
-            const { error } = await supabase.auth.signUp({
+            const { data, error } = await supabase.auth.signUp({
                 email: formData.email,
                 password: formData.password,
                 options: {
@@ -194,7 +194,12 @@ const App: React.FC = () => {
                 }
             });
             if (error) throw error;
-            alert("Cadastro realizado! Verifique seu email ou entre.");
+            
+            // If email confirmation is disabled in Supabase, session is created immediately.
+            // If enabled, session is null.
+            if (!data.session) {
+                alert("Cadastro realizado! Se a confirmação de e-mail estiver ativa, verifique sua caixa de entrada.");
+            }
         } else {
             const { error } = await supabase.auth.signInWithPassword({
                 email: formData.email,
@@ -331,6 +336,17 @@ const App: React.FC = () => {
                <span className="text-emerald-400 font-bold underline decoration-emerald-500/30 underline-offset-4">
                  {authMode === 'REGISTER' ? 'Fazer Login' : 'Criar Cadastro'}
                </span>
+             </button>
+
+             {/* ADMIN SHORTCUT LINK */}
+             <button
+               onClick={() => {
+                   setAuthMode('LOGIN');
+                   setFormData({ name: 'Admin', email: 'rafaelvollpilates@gmail.com', password: '123456' });
+               }}
+               className="text-[10px] text-slate-600 hover:text-emerald-500 transition-colors mt-4 uppercase tracking-widest opacity-50 hover:opacity-100 flex items-center gap-1"
+             >
+               <Lock size={10} /> Acesso Administrativo
              </button>
           </div>
         </div>
