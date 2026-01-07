@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Exercise, Feedback, ErrorCategory, VerbLessonSession, ExerciseType, BossExam, MilestoneExam, VerbState, StoreItem, GlobalGameConfig } from "../types";
 import { VERB_DATABASE, VerbEntry } from "../data/verbs";
@@ -392,14 +391,6 @@ async function getAudioContext(): Promise<AudioContext> {
     if (!audioContext) {
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     }
-    // CRITICAL FIX: Always try to resume if suspended. Browsers block auto-play.
-    if (audioContext.state === 'suspended') {
-        try {
-            await audioContext.resume();
-        } catch (e) {
-            console.warn("Audio Context resume failed (interaction required)", e);
-        }
-    }
     return audioContext;
 }
 
@@ -451,8 +442,13 @@ export const prefetchAudio = async (text: string) => {
 export const playTextToSpeech = async (text: string) => {
     try {
         const ctx = await getAudioContext();
-        // Ensure resumed
-        if (ctx.state === 'suspended') await ctx.resume();
+        
+        // CRITICAL FIX: Resume context immediately to prevent browser blocking audio
+        // Browsers require a user gesture to resume the AudioContext. 
+        // We call this *synchronously* before any await.
+        if (ctx.state === 'suspended') {
+            await ctx.resume();
+        }
 
         let base64Audio = AUDIO_CACHE[text];
 

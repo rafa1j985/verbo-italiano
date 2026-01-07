@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { generateStoreItemIdea, generateEmoji } from '../services/geminiService';
 import { getAllUsersAdmin } from '../services/supabaseService';
@@ -302,7 +303,7 @@ WHERE id NOT IN (SELECT id FROM public.profiles);
 INSERT INTO public.user_progress (id, brain_data)
 SELECT id, '{}'::jsonb
 FROM auth.users
-WHERE id NOT IN (SELECT id FROM public.user_progress);`;
+WHERE id NOT IN (SELECT id FROM public.user_progress);`
       navigator.clipboard.writeText(sql);
       setCopiedSync(true);
       setTimeout(() => setCopiedSync(false), 2000);
