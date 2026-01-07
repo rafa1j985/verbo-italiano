@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, Schema } from "@google/genai";
 import { Exercise, Feedback, ErrorCategory, VerbLessonSession, ExerciseType, BossExam, MilestoneExam, VerbState, StoreItem, GlobalGameConfig } from "../types";
 import { VERB_DATABASE, VerbEntry } from "../data/verbs";
 import { generateLocalLesson } from "./localExerciseService";
@@ -12,11 +12,12 @@ const modelName = "gemini-3-flash-preview";
 const ttsModelName = "gemini-2.5-flash-preview-tts";
 const imageModelName = "imagen-3.0-generate-001"; 
 
-// --- HELPER: CLEAN JSON (ROBUST) ---
+// --- HELPER: CLEAN JSON (BULLETPROOF) ---
 const cleanJSON = (text: string): string => {
     if (!text) return "{}";
-    // Regex insensitive to handle ```JSON or ```json
-    let cleaned = text.replace(/```json/gi, "").replace(/```/g, "");
+    // Regex matches ```json, ```JSON, ``` json, etc., and removes them
+    let cleaned = text.replace(/```[\w\s]*\n?/g, "").replace(/```/g, "");
+    
     // Find the first '{' and last '}' to strip any preamble/postscript
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
@@ -230,7 +231,10 @@ export const enrichPracticeSentences = async (verb: string, level: string, confi
 
 // --- CONTENT GENERATORS (Boss, Story, Etc) ---
 export const generateBossExam = async (knownVerbs: string[], level: string): Promise<BossExam | null> => {
-    const prompt = `Generate Boss Fight Italian level ${level}. Known: ${knownVerbs.join(", ")}. JSON: { "id": "boss", "phase1": [{ "pronoun": "Io", "verb": "Essere", "tense": "Presente", "correct": "sono" }], "phase2": [{ "sentence": "...", "isCorrect": boolean, "reason": "...", "correction": "..." }], "phase3": [{ "ptSentence": "...", "itSentence": "...", "targetVerb": "..." }] }`;
+    // Inject defaults if list is empty
+    const verbsToUse = knownVerbs.length > 0 ? knownVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
+    
+    const prompt = `Generate Boss Fight Italian level ${level}. Known: ${verbsToUse.join(", ")}. JSON: { "id": "boss", "phase1": [{ "pronoun": "Io", "verb": "Essere", "tense": "Presente", "correct": "sono" }], "phase2": [{ "sentence": "...", "isCorrect": boolean, "reason": "...", "correction": "..." }], "phase3": [{ "ptSentence": "...", "itSentence": "...", "targetVerb": "..." }] }`;
     try {
         const result = await ai.models.generateContent({
             model: modelName,
@@ -242,10 +246,23 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
 };
 
 export const generateStory = async (targetVerbs: string[], level: string) => {
-    // STRICT JSON PROMPT
-    const prompt = `You are a Strict JSON Generator. Create a short Italian story (Level ${level}) using: ${targetVerbs.join(", ")}. 
-    Output strictly VALID JSON. Do not wrap in markdown.
-    JSON Structure: { "title": "Italian Title", "storyText": "HTML formatted text with <b>verbs</b> bolded", "translation": "Portuguese translation" }`;
+    // 1. INJECT DEFAULTS IF EMPTY (Critical Fix)
+    const verbsToUse = targetVerbs.length > 0 ? targetVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
+
+    // 2. DEFINE SCHEMA (Guarantees valid JSON structure)
+    const storySchema: Schema = {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING },
+            storyText: { type: Type.STRING },
+            translation: { type: Type.STRING }
+        },
+        required: ["title", "storyText", "translation"]
+    };
+
+    const prompt = `Write a short Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
+    Provide a Portuguese translation.
+    Important: Wrap the target verbs in <b> tags within the Italian text (e.g., <b>mangia</b>).`;
     
     try {
         const result = await ai.models.generateContent({
@@ -253,12 +270,15 @@ export const generateStory = async (targetVerbs: string[], level: string) => {
             contents: [{ parts: [{ text: prompt }] }],
             config: { 
                 responseMimeType: "application/json",
+                responseSchema: storySchema,
                 temperature: 0.7 
             }
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        console.log("Raw Story Response:", text); // Debug log
+        
         if(!text) return null;
+        
+        // cleanJSON is still good practice even with Schema
         return JSON.parse(cleanJSON(text));
     } catch (e) { 
         console.error("Story Generation Failed:", e);
@@ -267,7 +287,8 @@ export const generateStory = async (targetVerbs: string[], level: string) => {
 };
 
 export const generateMilestoneExam = async (allVerbs: string[], tier: number): Promise<MilestoneExam | null> => {
-     const prompt = `Create Milestone Exam Tier ${tier}. Verbs: ${allVerbs.slice(0, 15).join(", ")}. JSON: { "id": "ms", "tier": ${tier}, "questions": [{ "type": "TRANSLATE_PT_IT"|"CONJUGATE"|"GAP_FILL", "question": "...", "context": "...", "correctAnswer": "...", "verb": "..." }] }`;
+     const verbsToUse = allVerbs.length > 0 ? allVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
+     const prompt = `Create Milestone Exam Tier ${tier}. Verbs: ${verbsToUse.slice(0, 15).join(", ")}. JSON: { "id": "ms", "tier": ${tier}, "questions": [{ "type": "TRANSLATE_PT_IT"|"CONJUGATE"|"GAP_FILL", "question": "...", "context": "...", "correctAnswer": "...", "verb": "..." }] }`;
     try {
         const result = await ai.models.generateContent({
             model: modelName,
