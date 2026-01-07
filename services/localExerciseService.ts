@@ -2,7 +2,7 @@
 import { Exercise, ExerciseType, VerbLevel, VerbLessonSession } from "../types";
 import { VerbEntry } from "../data/verbs";
 import { IRREGULAR_PRESENTE, FULL_PASSATO_PROSSIMO_DB, conjugateRegular } from "../data/conjugationRules";
-import { GENERIC_TEMPLATES, VERB_SPECIFIC_TEMPLATES } from "../data/sentenceTemplates";
+import { RICH_GENERIC_TEMPLATES, VERB_SPECIFIC_TEMPLATES } from "../data/sentenceTemplates";
 
 const normalizeVerb = (v: string) => {
     const trimmed = v.trim().toLowerCase();
@@ -41,14 +41,18 @@ const generateSentence = (verb: string, personIndex: number, conjugation: string
     let template = "";
     const specificTemplates = VERB_SPECIFIC_TEMPLATES[verb];
     
+    // Improved Logic: Use Specific if available, else use Rich Generic
     if (specificTemplates && specificTemplates.length > 0) {
         template = specificTemplates[Math.floor(Math.random() * specificTemplates.length)];
     } else {
-        template = GENERIC_TEMPLATES[Math.floor(Math.random() * GENERIC_TEMPLATES.length)];
+        template = RICH_GENERIC_TEMPLATES[Math.floor(Math.random() * RICH_GENERIC_TEMPLATES.length)];
     }
 
     const sentenceWithSubject = template.replace("[SUBJECT]", subject);
-    const parts = sentenceWithSubject.split("[VERB]");
+    // Split by [VERB] to find start and end
+    // Use regex to be safe about spacing
+    const parts = sentenceWithSubject.split(/\[VERB\]/);
+    
     const start = parts.length > 0 ? parts[0] : `${subject} `;
     const end = parts.length > 1 ? parts[1] : "";
 

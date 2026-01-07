@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { UserBrain, GlobalGameConfig } from '../types';
 import { generateStory, playTextToSpeech, generateIllustration } from '../services/geminiService';
-import { BookOpen, Star, ArrowRight, RefreshCw, Volume2, ThumbsUp, Brain, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { BookOpen, Star, ArrowRight, RefreshCw, Volume2, ThumbsUp, Brain, Image as ImageIcon, Sparkles, AlertTriangle } from 'lucide-react';
 
 interface StoryModeSessionProps {
   onExit: () => void;
@@ -12,6 +13,7 @@ interface StoryModeSessionProps {
 
 const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUpdateBrain, config }) => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [story, setStory] = useState<{ title: string; storyText: string; translation: string } | null>(null);
   const [ratingInterest, setRatingInterest] = useState(5);
   const [ratingComprehension, setRatingComprehension] = useState(5);
@@ -22,27 +24,34 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
-  useEffect(() => {
-    const loadStory = async () => {
-      // Pick the last 5 verbs added to history
-      const allVerbs = Object.keys(brain.verbHistory);
-      // Sort by lastSeen descending
-      const sortedVerbs = allVerbs.sort((a, b) => brain.verbHistory[b].lastSeen - brain.verbHistory[a].lastSeen);
-      const recentVerbs = sortedVerbs.slice(0, 5);
-      
-      setTargetVerbs(recentVerbs);
-      
-      const data = await generateStory(recentVerbs, brain.currentLevel);
-      if (data) {
-        setStory(data);
+  const loadStory = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+        // Pick the last 5 verbs added to history
+        const allVerbs = Object.keys(brain.verbHistory);
+        // Sort by lastSeen descending
+        const sortedVerbs = allVerbs.sort((a, b) => brain.verbHistory[b].lastSeen - brain.verbHistory[a].lastSeen);
+        const recentVerbs = sortedVerbs.slice(0, 5);
+        
+        setTargetVerbs(recentVerbs);
+        
+        const data = await generateStory(recentVerbs, brain.currentLevel);
+        if (data) {
+            setStory(data);
+            setLoading(false);
+            // TRIGGER IMAGE GENERATION AUTOMATICALLY
+            generateImage(data.storyText);
+        } else {
+            throw new Error("Falha na geração");
+        }
+    } catch (err) {
+        setError("Não foi possível criar a história. A IA pode estar sobrecarregada ou os verbos são insuficientes.");
         setLoading(false);
-        // TRIGGER IMAGE GENERATION AUTOMATICALLY
-        generateImage(data.storyText);
-      } else {
-        alert("Não foi possível gerar a história agora.");
-        onExit();
-      }
-    };
+    }
+  };
+
+  useEffect(() => {
     loadStory();
   }, []);
 
@@ -91,12 +100,33 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
 
   if (loading) {
     return (
-      <div className="h-full bg-slate-50 flex flex-col items-center justify-center space-y-4">
+      <div className="h-full bg-slate-50 flex flex-col items-center justify-center space-y-4 p-6 text-center">
         <RefreshCw className="animate-spin text-purple-600" size={48} />
         <h2 className="text-xl font-bold text-slate-700">Criando sua História...</h2>
-        <p className="text-slate-500">Conectando {targetVerbs.join(", ")} em um contexto único.</p>
+        <p className="text-slate-500">Conectando {targetVerbs.length > 0 ? targetVerbs.join(", ") : "verbos"} em um contexto único.</p>
+        <p className="text-xs text-slate-400 mt-4">Isso pode levar alguns segundos.</p>
       </div>
     );
+  }
+
+  if (error) {
+      return (
+          <div className="h-full bg-slate-50 flex flex-col items-center justify-center space-y-4 p-6 text-center">
+              <div className="bg-red-100 p-4 rounded-full text-red-500 mb-2">
+                  <AlertTriangle size={48} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-700">Erro na Criação</h2>
+              <p className="text-slate-500 max-w-xs">{error}</p>
+              <div className="flex gap-4 mt-6">
+                  <button onClick={onExit} className="px-6 py-2 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-100 font-bold">
+                      Sair
+                  </button>
+                  <button onClick={loadStory} className="px-6 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 font-bold shadow-lg">
+                      Tentar Novamente
+                  </button>
+              </div>
+          </div>
+      );
   }
 
   if (!story) return null;
@@ -115,11 +145,16 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
 
   return (
     <div className="max-w-2xl mx-auto h-full p-6 flex flex-col overflow-y-auto">
-      <div className="flex items-center gap-2 mb-6">
-          <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
-             <BookOpen size={24} />
+      <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+              <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                 <BookOpen size={24} />
+              </div>
+              <h1 className="text-2xl font-serif font-bold text-slate-800">Story Mode</h1>
           </div>
-          <h1 className="text-2xl font-serif font-bold text-slate-800">Story Mode</h1>
+          <button onClick={onExit} className="text-slate-400 hover:text-slate-600 text-sm font-bold">
+              Sair
+          </button>
       </div>
 
       {/* STORY CARD CONTAINER */}

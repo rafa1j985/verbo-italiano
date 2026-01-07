@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generateLesson, generateBatchLessons, analyzeSubmission, enrichPracticeSentences, playTextToSpeech, prefetchAudio } from '../services/geminiService';
 import { Feedback, UserBrain, VerbLessonSession, GlobalGameConfig } from '../types';
-import { ArrowRight, Check, X, RefreshCw, BookOpen, GraduationCap, ChevronRight, HelpCircle, Link2, Zap, AlertTriangle, Timer, Info, Eye, Trophy, Sparkles, Volume2, Repeat, Languages, Mic, MicOff, Activity, Lightbulb } from 'lucide-react';
+import { ArrowRight, Check, X, RefreshCw, BookOpen, GraduationCap, ChevronRight, HelpCircle, Link2, Zap, AlertTriangle, Timer, Info, Eye, Trophy, Sparkles, Volume2, Repeat, Languages, Mic, MicOff, Activity, Lightbulb, Quote, Brain } from 'lucide-react';
 import { VERB_DATABASE } from '../data/verbs';
+import { CULTURAL_QUOTES } from '../data/sentenceTemplates';
 
 interface ExerciseSessionProps {
   onExit: () => void;
@@ -184,6 +186,10 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   const [isEnriching, setIsEnriching] = useState(false);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   
+  // Loading & Cultural Quote State
+  const [loading, setLoading] = useState(true);
+  const [quote, setQuote] = useState(CULTURAL_QUOTES[0]);
+  
   // Session Metrics
   const [sessionErrors, setSessionErrors] = useState(0);
   const [perfectBonusAwarded, setPerfectBonusAwarded] = useState(false);
@@ -230,7 +236,6 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   
   // General Session
   const [lessonBuffer, setLessonBuffer] = useState<VerbLessonSession[]>([]);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   
   const hasInitialized = useRef(false);
@@ -355,7 +360,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [stage, drillInputs, practiceFeedback, practiceInput, gameCompleted, drillMask, showCorrections, gameType, flashcardInput, flashcardFeedback, dictationInput, dictationFeedback]); 
+  }, [stage, drillInputs, practiceFeedback, practiceInput, gameCompleted, drillMask, showCorrections, gameType, flashcardInput, flashcardFeedback, dictationInput, dictationFeedback, voiceBonusUnlocked]); 
 
 
   const fillBuffer = async () => {
@@ -369,15 +374,25 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
 
   const initializeSession = async () => {
       setLoading(true);
+      // Pick a random cultural quote for this loading instance
+      setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
+      
       const progress = getProgress();
       
       // LOGIC: ANTI-REPETITION
-      // Filter verbs seen in the last 24 hours to avoid immediate repetition
       const recentVerbs = Object.keys(brain.verbHistory)
           .filter(v => (Date.now() - brain.verbHistory[v].lastSeen) < 24 * 60 * 60 * 1000); 
           
-      // PASS BRAIN HISTORY TO GENERATOR
-      const firstLesson = await generateLesson(brain.currentLevel, progress, recentVerbs, brain.verbHistory, config);
+      // CREATE A MINIMUM DELAY PROMISE (e.g., 6 seconds) to let user read the quote
+      // This forces the "Waiting Room" experience
+      const minWaitTime = new Promise(resolve => setTimeout(resolve, 6000));
+      
+      // GENERATE CONTENT
+      const contentPromise = generateLesson(brain.currentLevel, progress, recentVerbs, brain.verbHistory, config);
+      
+      // WAIT FOR BOTH
+      const [_, firstLesson] = await Promise.all([minWaitTime, contentPromise]);
+      
       loadLesson(firstLesson);
       setLoading(false);
       fillBuffer();
@@ -390,21 +405,9 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       setSessionErrors(0);
       setPerfectBonusAwarded(false);
       setVoiceBonusUnlocked(false);
-      setIsEnriching(true);
-
-      enrichPracticeSentences(data.verb, brain.currentLevel, config)
-        .then(betterSentences => {
-            if (currentVerbRef.current !== data.verb) return;
-            if (betterSentences && betterSentences.length === 2) {
-                setSessionData(prev => {
-                    if (!prev || prev.verb !== data.verb) return prev;
-                    return { ...prev, practiceSentences: betterSentences };
-                });
-            }
-        })
-        .finally(() => {
-             if (currentVerbRef.current === data.verb) setIsEnriching(false);
-        });
+      
+      // No more "enriching" loading state here, we rely on the strong prompt from get go
+      setIsEnriching(false); 
       
       // Setup Drill with Dynamic Difficulty based on Level (Using Config)
       let blanksToHide = config.rules.drillMaskA1;
@@ -458,150 +461,126 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       }
   };
 
-  // --- XP SYSTEM ---
   const awardXP = (amount: number) => {
-      // Check Max Session Limit
-      const max = config.economy.xpMaxPerSession;
-      // We don't have current session XP tracked here easily without state, 
-      // but assuming the logic is sound and the user can't exploit.
-      
       const newBrain = { ...brain };
       const currentStats = newBrain.levelStats[brain.currentLevel];
       currentStats.score += amount;
       onUpdateBrain(newBrain);
   };
 
-  // --- BRAIN UPDATE HELPER FOR ERRORS ---
   const recordVerbError = (verbInfinitive: string) => {
       const newBrain = { ...brain };
       newBrain.sessionStreak = 0;
       newBrain.consecutiveErrors += 1;
-      
-      // Normalize verb key
       const verbKey = verbInfinitive.charAt(0).toUpperCase() + verbInfinitive.slice(1).toLowerCase();
-
       if (!newBrain.verbHistory[verbKey]) {
          newBrain.verbHistory[verbKey] = { lastSeen: Date.now(), consecutiveCorrect: 0, consecutiveErrors: 1, weight: 3, history: [false] };
       } else {
          newBrain.verbHistory[verbKey].consecutiveErrors += 1;
          newBrain.verbHistory[verbKey].consecutiveCorrect = 0;
-         newBrain.verbHistory[verbKey].weight += 2; // Increase weight to show more often
+         newBrain.verbHistory[verbKey].weight += 2;
          newBrain.verbHistory[verbKey].lastSeen = Date.now();
       }
       onUpdateBrain(newBrain);
   };
 
-  // --- STAGE 1: PRESENTATION HANDLER ---
   const handlePresentationComplete = () => {
-      awardXP(config.economy.xpPresentation);
+      let totalXP = config.economy.xpPresentation;
       if (voiceBonusUnlocked) {
-          awardXP(config.economy.xpVoiceBonus); // Bonus XP for speaking
+          totalXP += config.economy.xpVoiceBonus;
       }
+      awardXP(totalXP);
       setStage('DRILL');
   };
 
-  // --- STAGE 4: GAME HANDLERS ---
   const completeGame = () => {
-      if (gameCompleted) return; // Prevent double trigger
-      
-      let bonus = 0;
-      if (sessionErrors === 0) {
-          bonus = config.economy.xpPerfectRun;
-          setPerfectBonusAwarded(true);
-      }
-
-      const baseXP = gameType === 'FLASHCARD' ? config.economy.xpGameFlashcard : config.economy.xpGameStandard;
-
-      awardXP(baseXP + bonus); 
       setGameCompleted(true);
+      
+      let xpEarned = gameType === 'FLASHCARD' ? config.economy.xpGameFlashcard : config.economy.xpGameStandard;
+      
+      if (sessionErrors === 0) {
+          setPerfectBonusAwarded(true);
+          xpEarned += config.economy.xpPerfectRun;
+      }
+      
+      // Update Brain with XP and Exercise Count
+      const newBrain = { ...brain };
+      newBrain.levelStats[brain.currentLevel].score += xpEarned;
+      newBrain.levelStats[brain.currentLevel].exercisesCount += 1;
+      onUpdateBrain(newBrain);
   };
 
-  // --- LOGIC: NEXT LESSON ---
   const nextLesson = async () => {
       setLoading(true);
+      setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
+      
+      // MINIMUM DELAY FOR QUOTE READING (4 seconds for subsequent lessons)
+      const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+      
+      let nextData: VerbLessonSession;
+      let fetchPromise: Promise<void>;
+
       if (lessonBuffer.length > 0) {
-          const next = lessonBuffer[0];
+          nextData = lessonBuffer[0];
+          fetchPromise = Promise.resolve(); // Instant
           setLessonBuffer(prev => prev.slice(1));
-          loadLesson(next);
       } else {
           const progress = getProgress();
           const recentVerbs = Object.keys(brain.verbHistory)
             .filter(v => (Date.now() - brain.verbHistory[v].lastSeen) < 24 * 60 * 60 * 1000);
-          // PASS BRAIN HISTORY TO GENERATOR
           const fresh = await generateLesson(brain.currentLevel, progress, recentVerbs, brain.verbHistory, config);
-          loadLesson(fresh);
+          nextData = fresh;
+          fetchPromise = Promise.resolve();
       }
+
+      await Promise.all([minWait, fetchPromise]);
+      loadLesson(nextData!);
       setLoading(false);
   };
-
-  // --- LOGIC: SUBMIT DRILL ---
+  
   const checkDrill = () => {
       if (!sessionData) return;
-      if (showCorrections) {
-          setStage('PRACTICE_1');
-          return;
-      }
-
+      if (showCorrections) { setStage('PRACTICE_1'); return; }
       const correct = sessionData.lesson.fullConjugation;
       let allCorrect = true;
-      
       drillInputs.forEach((inp, idx) => {
          if (drillMask[idx]) {
-             const userClean = cleanString(inp);
-             const targetClean = cleanString(correct[idx]);
-             if (userClean.toLowerCase() !== targetClean.toLowerCase()) allCorrect = false;
+             if (cleanString(inp).toLowerCase() !== cleanString(correct[idx]).toLowerCase()) allCorrect = false;
          }
       });
-
       setDrillFeedback(allCorrect);
-
       if (allCorrect) {
-          awardXP(config.economy.xpDrill); // +XP for Drill
+          awardXP(config.economy.xpDrill);
           setTimeout(() => setStage('PRACTICE_1'), 1200);
       } else {
           setSessionErrors(prev => prev + 1);
-          // Standard penalty for main drill
           recordVerbError(sessionData.verb);
           setShowCorrections(true);
       }
   };
 
-  // --- LOGIC: SUBMIT PRACTICE ---
   const checkPractice = async (sentenceIdx: number) => {
       if (!sessionData || submitting) return;
       setSubmitting(true);
-      
       const target = sessionData.practiceSentences[sentenceIdx];
       const feedback = await analyzeSubmission(target.context, sessionData.verb, target.correctAnswer, practiceInput);
-      
       setPracticeFeedback(feedback);
-      
       const newBrain = { ...brain };
-      const currentStats = newBrain.levelStats[brain.currentLevel];
-      
       if (feedback.isCorrect) {
-          awardXP(config.economy.xpPractice); // +XP Per Sentence
+          awardXP(config.economy.xpPractice);
           newBrain.sessionStreak += 1;
           newBrain.consecutiveErrors = 0;
-          
-          // STORY MODE COUNTER INCREMENT
-          // Logic: Only increment if this is the FIRST time tracking this verb successfully,
-          // OR if it was previously failed (history full of false) and now corrected.
           const isNewVerb = !newBrain.verbHistory[sessionData.verb];
-          const isFirstSuccess = !isNewVerb && newBrain.verbHistory[sessionData.verb].history.every(h => h === false);
-
-          if (isNewVerb || isFirstSuccess) {
+          if (isNewVerb || (!isNewVerb && newBrain.verbHistory[sessionData.verb].history.every(h => h === false))) {
              newBrain.verbsSinceLastStory = (newBrain.verbsSinceLastStory || 0) + 1;
           }
-
           if (isNewVerb) {
              newBrain.verbHistory[sessionData.verb] = { lastSeen: Date.now(), consecutiveCorrect: 1, consecutiveErrors: 0, weight: 1, history: [true] };
-             currentStats.exercisesCount += 1; 
+             newBrain.levelStats[brain.currentLevel].exercisesCount += 1; 
           } else {
              newBrain.verbHistory[sessionData.verb].consecutiveCorrect += 1;
              newBrain.verbHistory[sessionData.verb].lastSeen = Date.now();
              newBrain.verbHistory[sessionData.verb].weight = Math.max(1, newBrain.verbHistory[sessionData.verb].weight - 1);
-             // Update history
              newBrain.verbHistory[sessionData.verb].history.push(true);
              if (newBrain.verbHistory[sessionData.verb].history.length > 5) newBrain.verbHistory[sessionData.verb].history.shift();
           }
@@ -609,8 +588,6 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
           setSessionErrors(prev => prev + 1);
           newBrain.sessionStreak = 0;
           newBrain.consecutiveErrors += 1;
-          // Note: Error tracking handles history update via recordVerbError usually, but for Practice we handle streaks here.
-          // For simple consistency:
           if (!newBrain.verbHistory[sessionData.verb]) {
               newBrain.verbHistory[sessionData.verb] = { lastSeen: Date.now(), consecutiveCorrect: 0, consecutiveErrors: 1, weight: 3, history: [false] };
           } else {
@@ -623,24 +600,17 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       setSubmitting(false);
   };
 
-  // --- GAME SETUP & HANDLERS ---
   const setupMatchGame = (data: VerbLessonSession) => {
       const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
       const cards: MatchCard[] = [];
       const cleanConjugations = data.lesson.fullConjugation.map(cleanString);
-      
-      // Separate Pronouns and Verbs for 2-column layout
       pronouns.forEach((p, idx) => {
-          cards.push({ id: p, text: p, type: 'PRONOUN', state: 'DEFAULT' }); // ID tracks the correct pair logic
+          cards.push({ id: p, text: p, type: 'PRONOUN', state: 'DEFAULT' });
           cards.push({ id: p, text: cleanConjugations[idx], type: 'VERB', state: 'DEFAULT' });
       });
-      
-      // Shuffle logic handled in render, but state stores all.
-      // We will render filtered lists.
       setMatchCards(cards); 
       setSelectedCardIdx(null);
   };
-
   const setupBinaryGame = (data: VerbLessonSession) => {
       const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
       const conjugation = data.lesson.fullConjugation.map(cleanString);
@@ -657,7 +627,6 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       }
       setBinaryQueue(queue); setBinaryIndex(0); setBinaryFeedback(null);
   };
-
   const setupIntruderGame = (data: VerbLessonSession) => {
       const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
       const conjugation = data.lesson.fullConjugation.map(cleanString);
@@ -674,194 +643,93 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       });
       setIntruderOptions(options);
   };
-
   const setupFlashcardGame = (data: VerbLessonSession) => {
-      // 1. Current Verb
       const currentVerbEntry = VERB_DATABASE.find(v => v.infinitive.toLowerCase() === data.verb.toLowerCase());
-      
-      // 2. History Verbs (Spaced Repetition)
       const historyKeys = Object.keys(brain.verbHistory).filter(v => v.toLowerCase() !== data.verb.toLowerCase());
-      const historyEntries = historyKeys
-          .sort(() => Math.random() - 0.5) // Shuffle
-          .slice(0, 4)
-          .map(k => VERB_DATABASE.find(v => v.infinitive.toLowerCase() === k.toLowerCase()))
-          .filter(v => v !== undefined) as typeof VERB_DATABASE;
-
-      // Fill with random if not enough history
+      const historyEntries = historyKeys.sort(() => Math.random() - 0.5).slice(0, 4).map(k => VERB_DATABASE.find(v => v.infinitive.toLowerCase() === k.toLowerCase())).filter(v => v !== undefined) as typeof VERB_DATABASE;
       while (historyEntries.length < 4) {
           const random = VERB_DATABASE[Math.floor(Math.random() * VERB_DATABASE.length)];
-          if (random.infinitive.toLowerCase() !== data.verb.toLowerCase() && !historyEntries.includes(random)) {
-              historyEntries.push(random);
-          }
+          if (random.infinitive.toLowerCase() !== data.verb.toLowerCase() && !historyEntries.includes(random)) historyEntries.push(random);
       }
-
-      // Build 5 Rounds
       const roundVerbs = [currentVerbEntry, ...historyEntries];
-      // Safety check if currentVerbEntry not found in DB
       if (!roundVerbs[0] && historyEntries.length > 0) roundVerbs[0] = historyEntries[0];
-      
       const queue: FlashcardRound[] = roundVerbs.filter(v => !!v).map(v => {
           const isItToPt = Math.random() > 0.5;
-          const accepted = v!.translation.split('/').map(s => s.trim().toLowerCase());
-          
-          if (isItToPt) {
-              return {
-                  question: v!.infinitive,
-                  answer: v!.translation,
-                  acceptedAnswers: accepted,
-                  direction: 'IT_PT'
-              };
-          } else {
-              // Pick one random translation for question, but allow infinitive as answer
-              const question = accepted[Math.floor(Math.random() * accepted.length)];
-              return {
-                  question: question.charAt(0).toUpperCase() + question.slice(1), // Capitalize
-                  answer: v!.infinitive,
-                  acceptedAnswers: [v!.infinitive.toLowerCase()],
-                  direction: 'PT_IT'
-              };
+          const rawSplits = v!.translation.split(/[\/,]/).map(s => s.trim().toLowerCase());
+          const cleanVariants = rawSplits.map(s => s.replace(/\(.*\)/, '').trim());
+          const accepted = Array.from(new Set([...rawSplits, ...cleanVariants])).filter(s => s.length > 0);
+          if (isItToPt) return { question: v!.infinitive, answer: v!.translation, acceptedAnswers: accepted, direction: 'IT_PT' };
+          else {
+              const question = cleanVariants[Math.floor(Math.random() * cleanVariants.length)];
+              return { question: question.charAt(0).toUpperCase() + question.slice(1), answer: v!.infinitive, acceptedAnswers: [v!.infinitive.toLowerCase()], direction: 'PT_IT' };
           }
       });
-
-      setFlashcardQueue(queue);
-      setFlashcardIndex(0);
-      setFlashcardInput('');
-      setFlashcardFeedback(null);
+      setFlashcardQueue(queue); setFlashcardIndex(0); setFlashcardInput(''); setFlashcardFeedback(null);
   };
-
   const setupDictationGame = (data: VerbLessonSession) => {
-      // 1. Current Verb
       const currentVerbEntry = VERB_DATABASE.find(v => v.infinitive.toLowerCase() === data.verb.toLowerCase());
-      
-      // 2. History Verbs (Up to 2)
       const historyKeys = Object.keys(brain.verbHistory).filter(v => v.toLowerCase() !== data.verb.toLowerCase());
-      const historyEntries = historyKeys
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 2)
-          .map(k => VERB_DATABASE.find(v => v.infinitive.toLowerCase() === k.toLowerCase()))
-          .filter(v => v !== undefined) as typeof VERB_DATABASE;
-
-      // Fill if needed
+      const historyEntries = historyKeys.sort(() => Math.random() - 0.5).slice(0, 2).map(k => VERB_DATABASE.find(v => v.infinitive.toLowerCase() === k.toLowerCase())).filter(v => v !== undefined) as typeof VERB_DATABASE;
       while (historyEntries.length < 2) {
           const random = VERB_DATABASE[Math.floor(Math.random() * VERB_DATABASE.length)];
-          if (random.infinitive.toLowerCase() !== data.verb.toLowerCase() && !historyEntries.includes(random)) {
-              historyEntries.push(random);
-          }
+          if (random.infinitive.toLowerCase() !== data.verb.toLowerCase() && !historyEntries.includes(random)) historyEntries.push(random);
       }
-
-      const selectedVerbs = [currentVerbEntry, ...historyEntries].filter(v => !!v);
       const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
-
-      // Use Current Verb x 3 for robustness in this version
       const indices = [0,1,2,3,4,5].sort(() => Math.random() - 0.5).slice(0, 3);
       const robustQueue: DictationRound[] = indices.map(idx => {
           let pronounLabel = pronouns[idx];
-          // Handle ambiguous pronoun for audio match
-          if (pronounLabel === 'Lui/Lei') {
-              pronounLabel = Math.random() > 0.5 ? 'Lui' : 'Lei';
-          }
-
+          if (pronounLabel === 'Lui/Lei') pronounLabel = Math.random() > 0.5 ? 'Lui' : 'Lei';
           const conjugations = data.lesson.fullConjugation.map(cleanString);
           const conj = conjugations[idx];
           const fullPhrase = `${pronounLabel} ${conj}`;
-
-          // PREFETCH AUDIO IN BACKGROUND
           prefetchAudio(fullPhrase);
-
-          return {
-              verbInfinitive: data.verb,
-              pronoun: pronounLabel,
-              conjugation: conj,
-              fullItalian: fullPhrase,
-              ptTranslation: data.lesson.definition
-          };
+          return { verbInfinitive: data.verb, pronoun: pronounLabel, conjugation: conj, fullItalian: fullPhrase, ptTranslation: data.lesson.definition };
       });
-
-      setDictationQueue(robustQueue);
-      setDictationIndex(0);
-      setDictationStep('LISTEN');
-      setDictationInput('');
-      setDictationFeedback(null);
+      setDictationQueue(robustQueue); setDictationIndex(0); setDictationStep('LISTEN'); setDictationInput(''); setDictationFeedback(null);
   };
 
   const handleFlashcardSubmit = () => {
       const current = flashcardQueue[flashcardIndex];
       const input = flashcardInput.trim().toLowerCase();
-      
-      const isCorrect = current.acceptedAnswers.includes(input);
-      
+      const isCorrect = current.acceptedAnswers.some(ans => input === ans);
       setFlashcardFeedback(isCorrect ? 'CORRECT' : 'WRONG');
-      if (!isCorrect) {
-          setSessionErrors(prev => prev + 1);
-          // NEW: Track error specifically
-          const verbKey = current.question === current.answer ? current.question : current.answer; // approximate
-          // Actually we have the full object in setup, but simplified here. 
-          // Not strictly updating brain for flashcard yet in this snippet, but good to add later.
-      }
-
+      if (!isCorrect) { setSessionErrors(prev => prev + 1); }
       setTimeout(() => {
-          setFlashcardFeedback(null);
-          setFlashcardInput('');
-          if (flashcardIndex < 4) setFlashcardIndex(prev => prev + 1);
-          else completeGame();
+          setFlashcardFeedback(null); setFlashcardInput('');
+          if (flashcardIndex < 4) setFlashcardIndex(prev => prev + 1); else completeGame();
       }, 1500); 
   };
 
   const handleDictationSubmit = () => {
       const current = dictationQueue[dictationIndex];
       const input = dictationInput.trim();
-      
       if (dictationStep === 'LISTEN') {
-          // Check Italian Transcription
-          // Normalize: remove case, extra spaces, and trailing punctuation
           const cleanInput = input.toLowerCase().replace(/[.,!?;:]/g, '').trim();
           const cleanTarget = current.fullItalian.toLowerCase().replace(/[.,!?;:]/g, '').trim();
-          
           const isCorrect = cleanInput === cleanTarget;
-          
-          if (isCorrect) {
-              setDictationInput(''); // Clear for next step
-              setDictationStep('TRANSLATE');
-          } else {
-              setDictationFeedback('WRONG');
-              setSessionErrors(prev => prev + 1);
-              recordVerbError(current.verbInfinitive); // Update Brain
-              
-              // If wrong listening, we fail the card and move to next (skip translation)
+          if (isCorrect) { setDictationInput(''); setDictationStep('TRANSLATE'); }
+          else {
+              setDictationFeedback('WRONG'); setSessionErrors(prev => prev + 1); recordVerbError(current.verbInfinitive);
               setTimeout(() => {
-                  setDictationFeedback(null);
-                  setDictationInput('');
-                  setDictationStep('LISTEN');
-                  if (dictationIndex < 2) {
-                       setDictationIndex(prev => prev + 1);
-                  } else {
-                       completeGame();
-                  }
+                  setDictationFeedback(null); setDictationInput(''); setDictationStep('LISTEN');
+                  if (dictationIndex < 2) setDictationIndex(prev => prev + 1); else completeGame();
               }, 2500);
           }
       } else {
-          // Check Translation (Meaning)
-          // Accept "Comer" or "Eu como" (contains the meaning)
-          // We check if the input contains the base PT translation
           const cleanInput = input.toLowerCase();
-          const target = current.ptTranslation.toLowerCase(); // "comer"
-          const isCorrect = cleanInput.includes(target);
-          
+          const targets = current.ptTranslation.toLowerCase().split(/[\/,]/).map(s => s.trim());
+          const isCorrect = targets.some(t => {
+              if (cleanInput === t) return true;
+              const tClean = t.replace(/\(.*\)/, '').trim();
+              if (cleanInput === tClean) return true;
+              if (cleanInput.length > 3 && cleanInput.includes(tClean)) return true;
+              return false;
+          });
           setDictationFeedback(isCorrect ? 'CORRECT' : 'WRONG');
-          if (!isCorrect) {
-              setSessionErrors(prev => prev + 1);
-              recordVerbError(current.verbInfinitive);
-          }
-
+          if (!isCorrect) { setSessionErrors(prev => prev + 1); recordVerbError(current.verbInfinitive); }
           setTimeout(() => {
-              setDictationFeedback(null);
-              setDictationInput('');
-              setDictationStep('LISTEN');
-              if (dictationIndex < 2) {
-                   setDictationIndex(prev => prev + 1);
-              } else {
-                   completeGame();
-              }
+              setDictationFeedback(null); setDictationInput(''); setDictationStep('LISTEN');
+              if (dictationIndex < 2) setDictationIndex(prev => prev + 1); else completeGame();
           }, 2000);
       }
   };
@@ -869,64 +737,25 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   const handleCardClick = (idx: number) => {
       const card = matchCards[idx];
       if (card.state === 'MATCHED') return;
-      
       if (selectedCardIdx === null) {
-          // Select first card
-          const newCards = [...matchCards];
-          newCards[idx].state = 'SELECTED';
-          setMatchCards(newCards);
-          setSelectedCardIdx(idx);
+          const newCards = [...matchCards]; newCards[idx].state = 'SELECTED'; setMatchCards(newCards); setSelectedCardIdx(idx);
       } else {
-          // Select second card
           if (selectedCardIdx === idx) return; 
-          
-          const first = matchCards[selectedCardIdx];
-          const second = matchCards[idx];
-          
-          // Check if valid types (One Pronoun, One Verb)
+          const first = matchCards[selectedCardIdx]; const second = matchCards[idx];
           if (first.type === second.type) {
-              // Just switch selection
-              const newCards = [...matchCards];
-              newCards[selectedCardIdx].state = 'DEFAULT';
-              newCards[idx].state = 'SELECTED';
-              setMatchCards(newCards);
-              setSelectedCardIdx(idx);
-              return;
+              const newCards = [...matchCards]; newCards[selectedCardIdx].state = 'DEFAULT'; newCards[idx].state = 'SELECTED'; setMatchCards(newCards); setSelectedCardIdx(idx); return;
           }
-
-          // --- VALIDATION LOGIC ---
-          // Identify which is pronoun and which is verb
           const pronounCard = first.type === 'PRONOUN' ? first : second;
           const verbCard = first.type === 'VERB' ? first : second;
-
-          // Find the correct conjugation for this pronoun from sessionData
           const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
           const pronounIndex = pronouns.indexOf(pronounCard.text);
           const correctConjugation = cleanString(sessionData!.lesson.fullConjugation[pronounIndex]);
-
-          // Compare text values (Fixes "sono" duplicate issue)
           const isMatch = verbCard.text.toLowerCase() === correctConjugation.toLowerCase();
-          
           if (isMatch) {
-              const newCards = [...matchCards];
-              newCards[selectedCardIdx].state = 'MATCHED';
-              newCards[idx].state = 'MATCHED';
-              setMatchCards(newCards);
-              setSelectedCardIdx(null);
-              if (newCards.every(c => c.state === 'MATCHED')) completeGame();
+              const newCards = [...matchCards]; newCards[selectedCardIdx].state = 'MATCHED'; newCards[idx].state = 'MATCHED'; setMatchCards(newCards); setSelectedCardIdx(null); if (newCards.every(c => c.state === 'MATCHED')) completeGame();
           } else {
-              const newCards = [...matchCards];
-              newCards[selectedCardIdx].state = 'ERROR';
-              newCards[idx].state = 'ERROR';
-              setMatchCards(newCards);
-              setSessionErrors(prev => prev + 1);
-              setTimeout(() => {
-                   const resetCards = [...matchCards];
-                   if (resetCards[selectedCardIdx]) resetCards[selectedCardIdx].state = 'DEFAULT';
-                   if (resetCards[idx]) resetCards[idx].state = 'DEFAULT';
-                   setMatchCards(resetCards);
-                   setSelectedCardIdx(null);
-              }, 800);
+              const newCards = [...matchCards]; newCards[selectedCardIdx].state = 'ERROR'; newCards[idx].state = 'ERROR'; setMatchCards(newCards); setSessionErrors(prev => prev + 1);
+              setTimeout(() => { const resetCards = [...matchCards]; if (resetCards[selectedCardIdx]) resetCards[selectedCardIdx].state = 'DEFAULT'; if (resetCards[idx]) resetCards[idx].state = 'DEFAULT'; setMatchCards(resetCards); setSelectedCardIdx(null); }, 800);
           }
       }
   };
@@ -934,47 +763,53 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   const handleBinaryChoice = (choice: boolean) => {
       const current = binaryQueue[binaryIndex];
       const isCorrect = choice === current.isCorrect;
-      
       setBinaryFeedback(isCorrect ? 'HIT' : 'MISS');
       if (!isCorrect) setSessionErrors(prev => prev + 1);
-
-      setTimeout(() => {
-          setBinaryFeedback(null);
-          if (binaryIndex < 4) setBinaryIndex(prev => prev + 1);
-          else completeGame();
-      }, 800);
+      setTimeout(() => { setBinaryFeedback(null); if (binaryIndex < 4) setBinaryIndex(prev => prev + 1); else completeGame(); }, 800);
   };
 
   const handleIntruderChoice = (id: number) => {
-      const opt = intruderOptions.find(o => o.id === id);
-      if (!opt) return;
-      
-      const newOpts = [...intruderOptions];
-      const idx = newOpts.findIndex(o => o.id === id);
-      
-      if (!opt.isCorrect) {
-          newOpts[idx].state = 'SELECTED_RIGHT'; 
-          setIntruderOptions(newOpts);
-          setTimeout(() => completeGame(), 1000);
-      } else {
-          setSessionErrors(prev => prev + 1);
-          newOpts[idx].state = 'SELECTED_WRONG';
-          setIntruderOptions(newOpts);
-      }
+      const opt = intruderOptions.find(o => o.id === id); if (!opt) return;
+      const newOpts = [...intruderOptions]; const idx = newOpts.findIndex(o => o.id === id);
+      if (!opt.isCorrect) { newOpts[idx].state = 'SELECTED_RIGHT'; setIntruderOptions(newOpts); setTimeout(() => completeGame(), 1000); }
+      else { setSessionErrors(prev => prev + 1); newOpts[idx].state = 'SELECTED_WRONG'; setIntruderOptions(newOpts); }
   };
 
-
-  if (loading || !sessionData) {
+  if (loading) {
       return (
-          <div className="h-full flex flex-col items-center justify-center space-y-4">
-              <RefreshCw className="animate-spin text-emerald-500" size={48} />
-              <p className="text-slate-500 font-medium animate-pulse">Sintonizando frequência neural...</p>
+          <div className="h-full bg-slate-900 flex flex-col items-center justify-center p-8 text-center animate-fade-in relative overflow-hidden">
+              {/* Background Ambient Effect */}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800 to-slate-900 opacity-50"></div>
+              
+              <div className="relative z-10 flex flex-col items-center max-w-lg">
+                  <div className="mb-8">
+                      <RefreshCw className="animate-spin text-emerald-500" size={48} />
+                  </div>
+                  
+                  <div className="mb-8 space-y-4">
+                      <Quote className="text-slate-600 mx-auto transform -scale-x-100" size={32} />
+                      <h3 className="text-2xl font-serif font-bold text-white leading-relaxed italic">
+                          "{quote.it}"
+                      </h3>
+                      <p className="text-emerald-400 font-medium">
+                          {quote.pt}
+                      </p>
+                      <p className="text-slate-500 text-xs uppercase tracking-widest mt-4">
+                          — {quote.author}
+                      </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-slate-500 text-xs mt-8 animate-pulse">
+                      <Brain className="text-emerald-600" size={14} />
+                      <span>Contextualizando exercício para você...</span>
+                  </div>
+              </div>
           </div>
       );
   }
 
-  // --- INDIRECT VERB VISUAL HELPER ---
-  // If the verb is like "Piacere", we show "Io (A me)", "Tu (A te)" etc.
+  if (!sessionData) return null;
+
   const isIndirectVerb = VERB_DATABASE.find(v => v.infinitive === sessionData.verb)?.tags?.includes('indirect');
   const getIndirectLabel = (pronoun: string, index: number) => {
       if (!isIndirectVerb) return pronoun;
@@ -1346,12 +1181,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
                            
                            {/* Right Column: Verbs */}
                            <div className="flex flex-col gap-3 w-1/2">
-                               {matchCards.filter(c => c.type === 'VERB').sort((a,b) => a.text.localeCompare(b.text)).map((card) => { // Simple shuffle viz, real shuffle in setup
-                                   // Note: To preserve click logic we need original index. 
-                                   // The sorting here is purely visual if matchCards is already shuffled. 
-                                   // Since setupMatchGame stores them interleaved, we just filter.
-                                   // But wait, setupMatchGame doesn't shuffle properly for 2 cols if we just filter.
-                                   // Fix: We use the already shuffled 'matchCards' array but render them in 2 cols based on type.
+                               {matchCards.filter(c => c.type === 'VERB').sort((a,b) => a.text.localeCompare(b.text)).map((card) => { 
                                    const originalIdx = matchCards.indexOf(card);
                                    return (
                                        <button

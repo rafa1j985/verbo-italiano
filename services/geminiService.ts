@@ -195,12 +195,49 @@ export const generateBatchLessons = async (level: string, count: number, progres
 };
 
 const generateLessonAI = async (verb: string, level: string, tense: string): Promise<VerbLessonSession> => {
-    const prompt = `Create Italian lesson for "${verb}" in "${tense}". Level: ${level}. JSON: { "verb": "${verb}", "level": "${level}", "tense": "${tense}", "lesson": { "definition": "PT trans", "secondaryTranslations": ["a","b"], "verbType": "desc", "fullConjugation": ["io","tu","lui","noi","voi","loro"], "usageTip": "PT tip" }, "practiceSentences": [{ "context": "ctx", "sentenceStart": "...", "sentenceEnd": "...", "correctAnswer": "..." }] }`;
+    // UPDATED PROMPT BASED ON USER REQUEST
+    const prompt = `
+    Act as a native Italian teacher.
+    Create a lesson for the verb "${verb}" in "${tense}" (Level: ${level}).
+    
+    CRITICAL INSTRUCTION FOR PRACTICE SENTENCES:
+    Crie frases que um italiano real diria em Roma, Milão ou Toscana num dia de trânsito, no trabalho, na família ou numa discussão sobre comida. 
+    Use ironia, situações cotidianas e evite clichês de livros didáticos. O contexto deve ser rico, sem frase robotica.
+    The sentence MUST contain a blank/gap where the verb conjugation should be. The user has to guess the conjugation.
+    
+    Return strict JSON:
+    { 
+      "verb": "${verb}", 
+      "level": "${level}", 
+      "tense": "${tense}", 
+      "lesson": { 
+        "definition": "PT translation", 
+        "secondaryTranslations": ["alt1","alt2"], 
+        "verbType": "description", 
+        "fullConjugation": ["io form","tu form","lui form","noi form","voi form","loro form"], 
+        "usageTip": "A cultural nuance or tip in Portuguese" 
+      }, 
+      "practiceSentences": [
+        { 
+          "context": "Short context desc in PT (e.g. 'No trânsito de Roma')", 
+          "sentenceStart": "Start of sentence (e.g. 'Mentre guido, io')", 
+          "sentenceEnd": "End of sentence (e.g. '...sempre contro i turisti.')", 
+          "correctAnswer": "Conjugated Verb (e.g. 'impreco')" 
+        },
+        {
+          "context": "Another specific context in PT",
+          "sentenceStart": "...",
+          "sentenceEnd": "...",
+          "correctAnswer": "..."
+        }
+      ] 
+    }`;
+
     try {
         const result = await ai.models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json" }
+            config: { responseMimeType: "application/json", temperature: 0.8 } // Increased temp for creativity
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("No text");
@@ -246,10 +283,10 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
 };
 
 export const generateStory = async (targetVerbs: string[], level: string) => {
-    // 1. INJECT DEFAULTS IF EMPTY (Critical Fix)
+    // 1. INJECT DEFAULTS IF EMPTY
     const verbsToUse = targetVerbs.length > 0 ? targetVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
 
-    // 2. DEFINE SCHEMA (Guarantees valid JSON structure)
+    // 2. DEFINE SCHEMA
     const storySchema: Schema = {
         type: Type.OBJECT,
         properties: {
@@ -260,25 +297,31 @@ export const generateStory = async (targetVerbs: string[], level: string) => {
         required: ["title", "storyText", "translation"]
     };
 
-    const prompt = `Write a short Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
-    Provide a Portuguese translation.
-    Important: Wrap the target verbs in <b> tags within the Italian text (e.g., <b>mangia</b>).`;
+    const prompt = `Write a creative, engaging Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
+    Requirements:
+    - Use all verbs in the list.
+    - Wrap the target verbs in <b> tags within the Italian text (e.g., "Lui <b>mangia</b> la pizza").
+    - Provide a Portuguese translation.
+    - Return strictly JSON.`;
     
     try {
+        // UPGRADE TO PRO MODEL FOR COMPLEX TASKS
         const result = await ai.models.generateContent({
-            model: modelName,
+            model: "gemini-3-pro-preview", // Use Pro for stories
             contents: [{ parts: [{ text: prompt }] }],
             config: { 
                 responseMimeType: "application/json",
                 responseSchema: storySchema,
-                temperature: 0.7 
+                temperature: 0.8 // Slightly higher creativity
             }
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         
-        if(!text) return null;
+        if(!text) {
+             console.error("Story Generation returned empty text.");
+             return null;
+        }
         
-        // cleanJSON is still good practice even with Schema
         return JSON.parse(cleanJSON(text));
     } catch (e) { 
         console.error("Story Generation Failed:", e);
@@ -323,13 +366,19 @@ export const generateEmoji = async (text: string) => {
 
 export const generateIllustration = async (storyText: string): Promise<string | null> => {
     try {
+         // Clean tags before sending to image gen
+         const cleanPrompt = storyText.replace(/<[^>]*>/g, '').substring(0, 400);
+         
          const response = await ai.models.generateImages({
             model: imageModelName,
-            prompt: `Artistic illustration: ${storyText.substring(0, 300)}`,
+            prompt: `Artistic illustration for story: ${cleanPrompt}`,
             config: { numberOfImages: 1, aspectRatio: "4:3", outputMimeType: "image/jpeg" }
         });
         return response.generatedImages?.[0]?.image?.imageBytes ? `data:image/jpeg;base64,${response.generatedImages[0].image.imageBytes}` : null;
-    } catch (e) { return null; }
+    } catch (e) { 
+        console.error("Image Generation Failed", e);
+        return null; 
+    }
 };
 
 // --- HELPERS ---
