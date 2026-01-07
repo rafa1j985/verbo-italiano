@@ -13,7 +13,9 @@ import IlMercato from './components/IlMercato';
 import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2, Lock } from 'lucide-react';
 import { STORE_CATALOG } from './data/storeItems';
 
-const INITIAL_BRAIN: UserBrain = {
+// CRITICAL FIX: Changed from constant object to a Factory Function.
+// This ensures every new session gets a FRESH object in memory, preventing data leaks between users.
+const getInitialBrain = (): UserBrain => ({
   currentLevel: 'A1',
   levelStats: {
     'A1': { score: 0, exercisesCount: 0, lastPlayed: Date.now() },
@@ -36,7 +38,7 @@ const INITIAL_BRAIN: UserBrain = {
   activeTitle: null,
   streakFreeze: 0,
   notifications: []
-};
+});
 
 // --- DEFAULT GOD MODE CONFIG ---
 const DEFAULT_GAME_CONFIG: GlobalGameConfig = {
@@ -97,8 +99,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<'DASHBOARD' | 'SESSION' | 'BOSS_FIGHT' | 'STORY_MODE' | 'MILESTONE' | 'MERCATO'>('DASHBOARD');
   const [activeMilestoneTier, setActiveMilestoneTier] = useState<number>(0);
   
-  // PERSISTENT BRAIN STATE
-  const [brain, setBrain] = useState<UserBrain>(INITIAL_BRAIN);
+  // PERSISTENT BRAIN STATE - Initialize with factory function
+  const [brain, setBrain] = useState<UserBrain>(getInitialBrain());
   const [storeCatalog, setStoreCatalog] = useState<StoreItem[]>(STORE_CATALOG);
   const [gameConfig, setGameConfig] = useState<GlobalGameConfig>(DEFAULT_GAME_CONFIG);
 
@@ -123,7 +125,8 @@ const App: React.FC = () => {
          loadUserData(session.user.id);
       } else {
          // CRITICAL FIX: Wipe state on logout to prevent data leaks
-         setBrain(INITIAL_BRAIN);
+         // We call getInitialBrain() to ensure a completely fresh object reference
+         setBrain(getInitialBrain());
          setRole(null);
          setUserName('');
          setView('DASHBOARD');
@@ -152,9 +155,10 @@ const App: React.FC = () => {
       const savedBrain = await loadUserProgress(userId);
       if (savedBrain) {
           // Merge with initial to ensure new structure fields exist
-          setBrain({ ...INITIAL_BRAIN, ...savedBrain });
+          // We spread getInitialBrain() first to ensure we have the base structure, then overwrite with saved data
+          setBrain({ ...getInitialBrain(), ...savedBrain });
       } else {
-          setBrain(INITIAL_BRAIN); // Ensure clean slate if new user
+          setBrain(getInitialBrain()); // Ensure clean slate if new user
       }
 
       // 3. Load Global Config (Only 1 round trip)
@@ -208,7 +212,11 @@ const App: React.FC = () => {
             if (error) throw error;
         }
     } catch (error: any) {
-        alert(error.message || "Erro na autenticação");
+        if (error.message.includes("Invalid login credentials")) {
+            alert("Erro: Credenciais inválidas. Se este é seu primeiro acesso com este e-mail, certifique-se de criar a conta primeiro na aba 'Criar Cadastro'.");
+        } else {
+            alert(error.message || "Erro na autenticação");
+        }
     } finally {
         setAuthLoading(false);
     }
@@ -341,8 +349,9 @@ const App: React.FC = () => {
              {/* ADMIN SHORTCUT LINK */}
              <button
                onClick={() => {
-                   setAuthMode('LOGIN');
+                   setAuthMode('REGISTER'); // Default to Register to solve "User not found" issue
                    setFormData({ name: 'Admin', email: 'rafaelvollpilates@gmail.com', password: '123456' });
+                   alert("Atenção: Se for o primeiro acesso, certifique-se de estar na aba 'CRIAR CADASTRO' para registrar o admin.");
                }}
                className="text-[10px] text-slate-600 hover:text-emerald-500 transition-colors mt-4 uppercase tracking-widest opacity-50 hover:opacity-100 flex items-center gap-1"
              >
