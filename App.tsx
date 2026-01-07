@@ -1,5 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from './services/supabaseClient';
+import { loadUserProgress, saveUserProgress, getGlobalConfig, saveGlobalConfig } from './services/supabaseService';
 import { UserRole, UserBrain, StoreItem, Notification, GlobalGameConfig } from './types';
 import StudentDashboard from './components/StudentDashboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -8,11 +10,8 @@ import BossFightSession from './components/BossFightSession';
 import StoryModeSession from './components/StoryModeSession'; 
 import MilestoneSession from './components/MilestoneSession';
 import IlMercato from './components/IlMercato';
-import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, ArrowRight } from 'lucide-react';
+import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2 } from 'lucide-react';
 import { STORE_CATALOG } from './data/storeItems';
-
-// Admin email as per requirement
-const ADMIN_EMAIL = "rafaelvollpilates@gmail.com";
 
 const INITIAL_BRAIN: UserBrain = {
   currentLevel: 'A1',
@@ -44,7 +43,7 @@ const DEFAULT_GAME_CONFIG: GlobalGameConfig = {
     economy: {
         xpPresentation: 5,
         xpDrill: 10,
-        xpPractice: 5, // x2 per session
+        xpPractice: 5, 
         xpVoiceBonus: 5,
         xpPerfectRun: 10,
         xpGameFlashcard: 20,
@@ -84,10 +83,15 @@ const DEFAULT_GAME_CONFIG: GlobalGameConfig = {
     }
 };
 
-type AuthMode = 'LOGIN' | 'REGISTER' | 'ADMIN';
+type AuthMode = 'LOGIN' | 'REGISTER';
 
 const App: React.FC = () => {
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Session State
+  const [session, setSession] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
+  
+  // App State
   const [userName, setUserName] = useState<string>('');
   const [role, setRole] = useState<UserRole | null>(null);
   const [view, setView] = useState<'DASHBOARD' | 'SESSION' | 'BOSS_FIGHT' | 'STORY_MODE' | 'MILESTONE' | 'MERCATO'>('DASHBOARD');
@@ -95,94 +99,153 @@ const App: React.FC = () => {
   
   // PERSISTENT BRAIN STATE
   const [brain, setBrain] = useState<UserBrain>(INITIAL_BRAIN);
-
-  // PERSISTENT STORE CATALOG (For Admin edits)
   const [storeCatalog, setStoreCatalog] = useState<StoreItem[]>(STORE_CATALOG);
-
-  // GOD MODE CONFIG STATE
   const [gameConfig, setGameConfig] = useState<GlobalGameConfig>(DEFAULT_GAME_CONFIG);
 
-  // Determine Active Theme Class
-  const getThemeClass = () => {
-      if (!brain.activeTheme || brain.activeTheme === 'default') return 'bg-slate-50 text-slate-900';
-      const themeItem = storeCatalog.find(i => i.id === brain.activeTheme);
-      // Use themeSkin if available (for new items), fallback to asset if it was legacy class string (compatibility), fallback to default
-      return themeItem?.themeSkin || 'bg-slate-50 text-slate-900';
-  };
-
-  const themeClass = getThemeClass();
-  const isDark = themeClass.includes('slate-900'); // Simple check for dark mode adjustments
-
-  // Auth Form State
+  // Auth Form
   const [authMode, setAuthMode] = useState<AuthMode>('REGISTER');
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: ''
-  });
+  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
+  // --- INIT: CHECK SESSION ---
+  useEffect(() => {
+    // Initial Session Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) loadUserData(session.user.id);
     });
+
+    // Listen for Auth Changes (Login/Logout)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+         loadUserData(session.user.id);
+      } else {
+         // CRITICAL FIX: Wipe state on logout to prevent data leaks
+         setBrain(INITIAL_BRAIN);
+         setRole(null);
+         setUserName('');
+         setView('DASHBOARD');
+         setFormData({ name: '', email: '', password: '' }); // Clear form
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // --- DATA LOADING ---
+  const loadUserData = async (userId: string) => {
+      setDataLoading(true);
+      
+      // 1. Load Profile (Role, Name)
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      if (profile) {
+          setUserName(profile.full_name || 'Estudante');
+          setRole(profile.role === 'ADMIN' ? UserRole.ADMIN : UserRole.STUDENT);
+      } else {
+          // If profile doesn't exist yet (latency), default to student
+          setRole(UserRole.STUDENT);
+      }
+
+      // 2. Load Brain (Progress)
+      const savedBrain = await loadUserProgress(userId);
+      if (savedBrain) {
+          // Merge with initial to ensure new structure fields exist
+          setBrain({ ...INITIAL_BRAIN, ...savedBrain });
+      } else {
+          setBrain(INITIAL_BRAIN); // Ensure clean slate if new user
+      }
+
+      // 3. Load Global Config (Only 1 round trip)
+      const savedConfig = await getGlobalConfig();
+      if (savedConfig) {
+          setGameConfig(savedConfig);
+      }
+
+      setDataLoading(false);
   };
 
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  // --- BRAIN UPDATE WRAPPER ---
+  const handleUpdateBrain = (newBrain: UserBrain) => {
+      setBrain(newBrain);
+      if (session?.user?.id) {
+          // Auto-save to Supabase
+          saveUserProgress(session.user.id, newBrain);
+      }
+  };
+
+  const handleUpdateConfig = (newConfig: GlobalGameConfig) => {
+      setGameConfig(newConfig);
+      saveGlobalConfig(newConfig);
+  };
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (authMode === 'ADMIN') {
-      if (formData.email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        setUserEmail(formData.email);
-        setUserName('Admin');
-        setRole(UserRole.ADMIN);
-      } else {
-        alert("Acesso negado. Este email não possui privilégios de administrador.");
-      }
-    } else {
-      // Student Logic (Register or Login)
-      if (formData.email) {
-        setUserEmail(formData.email);
-        setUserName(formData.name || formData.email.split('@')[0]);
-        setRole(UserRole.STUDENT);
-      }
+    setAuthLoading(true);
+
+    try {
+        if (authMode === 'REGISTER') {
+            const { error } = await supabase.auth.signUp({
+                email: formData.email,
+                password: formData.password,
+                options: {
+                    data: { full_name: formData.name } // Passed to profile via DB Trigger
+                }
+            });
+            if (error) throw error;
+            alert("Cadastro realizado! Verifique seu email ou entre.");
+        } else {
+            const { error } = await supabase.auth.signInWithPassword({
+                email: formData.email,
+                password: formData.password
+            });
+            if (error) throw error;
+        }
+    } catch (error: any) {
+        alert(error.message || "Erro na autenticação");
+    } finally {
+        setAuthLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    setUserEmail(null);
-    setUserName('');
-    setRole(null);
-    setView('DASHBOARD');
-    setAuthMode('REGISTER');
-    setFormData({ name: '', email: '', password: '' });
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    // Logic handled by onAuthStateChange listener
   };
 
-  // Handler for starting milestone
   const startMilestone = (tier: number) => {
       setActiveMilestoneTier(tier);
       setView('MILESTONE');
   };
 
-  // BROADCAST SYSTEM (Simulated)
-  // When Admin updates store, we push notifications to the user brain
-  const handleBroadcast = (notif: Notification) => {
-      setBrain(prev => ({
-          ...prev,
-          notifications: [...(prev.notifications || []), notif]
-      }));
+  const getThemeClass = () => {
+      if (!brain.activeTheme || brain.activeTheme === 'default') return 'bg-slate-50 text-slate-900';
+      const themeItem = storeCatalog.find(i => i.id === brain.activeTheme);
+      return themeItem?.themeSkin || 'bg-slate-50 text-slate-900';
   };
+  const themeClass = getThemeClass();
+  const isDark = themeClass.includes('slate-900');
 
-  if (!userEmail) {
+  // --- RENDER: LOADING SCREEN ---
+  if (session && dataLoading) {
+      return (
+          <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white gap-4">
+              <Loader2 className="animate-spin text-emerald-500" size={48} />
+              <p className="animate-pulse font-serif">Sincronizando banco de dados neural...</p>
+          </div>
+      );
+  }
+
+  // --- RENDER: AUTH SCREEN ---
+  if (!session) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
         <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 relative overflow-hidden">
           
-          {/* Header */}
           <div className="flex flex-col items-center mb-8">
             <div className="bg-slate-700/50 p-4 rounded-full mb-4 relative group">
                <BrainCircuit size={48} className="text-emerald-400 relative z-10" />
-               {/* Subtle Italian Halo behind logo */}
                <div className="absolute -inset-2 bg-gradient-to-tr from-green-500/20 via-white/5 to-red-500/20 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
             </div>
             
@@ -196,116 +259,89 @@ const App: React.FC = () => {
             
             <div className="h-1 w-12 bg-gradient-to-r from-emerald-500 via-white to-red-500 rounded-full mt-2 opacity-80"></div>
             <p className="text-slate-400 text-center text-sm uppercase tracking-widest font-medium mt-2">
-              {authMode === 'ADMIN' ? 'Painel Administrativo' : 'Automação Cognitiva'}
+              Automação Cognitiva
             </p>
           </div>
           
           <form onSubmit={handleAuthSubmit} className="space-y-4">
             
-            {/* Name Field */}
-            {authMode !== 'ADMIN' && (
-              <div className="space-y-1">
+            {/* NAME FIELD: ONLY SHOWN IF REGISTERING */}
+            {authMode === 'REGISTER' && (
+              <div className="space-y-1 animate-in slide-in-from-top-2">
                 <label className="text-xs font-bold text-slate-500 uppercase ml-1">Nome</label>
                 <input 
                   type="text" 
-                  name="name" 
-                  required={authMode === 'REGISTER'} 
                   value={formData.name}
-                  onChange={handleInputChange}
+                  onChange={e => setFormData({...formData, name: e.target.value})}
                   placeholder="Como quer ser chamado?"
+                  required
                   className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition"
                 />
               </div>
             )}
 
-            {/* Email Field */}
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase ml-1">Email</label>
               <input 
                 type="email" 
-                name="email" 
-                required
                 value={formData.email}
-                onChange={handleInputChange}
+                onChange={e => setFormData({...formData, email: e.target.value})}
                 placeholder="seu@email.com"
+                required
                 className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition"
               />
             </div>
 
-            {/* Password Field */}
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase ml-1">Senha</label>
               <input 
                 type="password" 
-                name="password" 
-                required
                 value={formData.password}
-                onChange={handleInputChange}
+                onChange={e => setFormData({...formData, password: e.target.value})}
                 placeholder="••••••••"
+                required
                 className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition"
               />
             </div>
 
             <button 
               type="submit"
+              disabled={authLoading}
               className={`w-full font-bold py-3.5 rounded-lg transition-all transform active:scale-95 flex items-center justify-center gap-2 mt-2
-                ${authMode === 'ADMIN' 
-                  ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/20' 
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20'
+                ${authMode === 'REGISTER' 
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20' 
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20'
                 }`}
             >
-              {authMode === 'REGISTER' && <><UserPlus size={20} /> Criar Conta</>}
-              {authMode === 'LOGIN' && <><LogIn size={20} /> Entrar</>}
-              {authMode === 'ADMIN' && <><ShieldAlert size={20} /> Acessar Sistema</>}
+              {authLoading ? <Loader2 className="animate-spin" /> : (
+                 authMode === 'REGISTER' ? <><UserPlus size={20} /> Criar Conta</> : <><LogIn size={20} /> Entrar</>
+              )}
             </button>
           </form>
 
-          {/* Toggle Modes */}
           <div className="mt-6 flex flex-col items-center gap-3">
-             {authMode !== 'ADMIN' && (
-               <button 
-                 onClick={() => setAuthMode(authMode === 'REGISTER' ? 'LOGIN' : 'REGISTER')}
-                 className="text-slate-400 text-sm hover:text-white transition-colors"
-               >
-                 {authMode === 'REGISTER' ? 'Já tem uma conta? ' : 'Novo por aqui? '}
-                 <span className="text-emerald-400 font-bold underline decoration-emerald-500/30 underline-offset-4">
-                   {authMode === 'REGISTER' ? 'Fazer Login' : 'Criar Cadastro'}
-                 </span>
-               </button>
-             )}
-             
-             {authMode === 'ADMIN' && (
-                <button 
-                  onClick={() => setAuthMode('LOGIN')}
-                  className="text-slate-500 hover:text-white text-sm flex items-center gap-1"
-                >
-                  <ArrowRight size={14} className="rotate-180" /> Voltar para Acesso Estudante
-                </button>
-             )}
+             <button 
+               onClick={() => {
+                 setAuthMode(authMode === 'REGISTER' ? 'LOGIN' : 'REGISTER');
+                 setFormData({ name: '', email: '', password: '' }); // Clear form on toggle
+               }}
+               className="text-slate-400 text-sm hover:text-white transition-colors"
+             >
+               {authMode === 'REGISTER' ? 'Já tem uma conta? ' : 'Novo por aqui? '}
+               <span className="text-emerald-400 font-bold underline decoration-emerald-500/30 underline-offset-4">
+                 {authMode === 'REGISTER' ? 'Fazer Login' : 'Criar Cadastro'}
+               </span>
+             </button>
           </div>
-
-          {/* Footer Admin Link */}
-          {authMode !== 'ADMIN' && (
-            <div className="mt-8 pt-6 border-t border-slate-700/50 text-center">
-               <button 
-                onClick={() => setAuthMode('ADMIN')}
-                className="text-[10px] uppercase tracking-widest text-slate-600 hover:text-red-400 transition-colors font-bold"
-               >
-                 Acesso Administrativo
-               </button>
-            </div>
-          )}
-
         </div>
       </div>
     );
   }
 
+  // --- RENDER: MAIN APP ---
   return (
     <div className={`min-h-screen flex flex-col transition-colors duration-700 ${themeClass}`}>
-      {/* Top Navigation with ITALIAN TRICOLORE ACCENT */}
       <header className={`relative ${isDark ? 'bg-slate-900 border-b border-slate-800 text-white' : 'bg-white border-b border-slate-200 text-slate-900'} sticky top-0 z-50 transition-colors duration-700`}>
-        
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setView('DASHBOARD')}>
             <div className="relative">
@@ -313,7 +349,6 @@ const App: React.FC = () => {
             </div>
             <span className="font-serif font-bold text-xl tracking-tight flex items-baseline">
               VerboVivo
-              {/* THE "IT" BADGE: Subtle, Elegant, Distinct */}
               <span className="ml-0.5 text-[10px] font-sans font-black tracking-tight flex items-center -translate-y-1 opacity-90">
                   <span className="text-emerald-600">I</span>
                   <span className="text-red-600">T</span>
@@ -336,8 +371,10 @@ const App: React.FC = () => {
             
             <div className={`flex items-center gap-3 pl-4 border-l ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <div className="text-right hidden md:block">
-                <div className="text-sm font-medium">{role === UserRole.ADMIN ? 'Admin Master' : userName}</div>
-                <div className="text-xs opacity-60">{userEmail}</div>
+                <div className="text-sm font-medium flex items-center gap-1 justify-end">
+                    {userName} {role === UserRole.ADMIN && <ShieldAlert size={12} className="text-red-500"/>}
+                </div>
+                <div className="text-xs opacity-60">{session.user.email}</div>
               </div>
               <button onClick={handleLogout} className="opacity-60 hover:opacity-100 hover:text-red-500 transition-all" title="Sair">
                 <LogIn size={20} className="rotate-180" />
@@ -345,20 +382,17 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
-
-        {/* THE TRICOLORE STRIP: Elegant 3px gradient border at the bottom of header */}
         <div className="absolute bottom-0 left-0 w-full h-[3px] bg-gradient-to-r from-emerald-600 via-slate-100 to-red-600 opacity-80"></div>
       </header>
 
-      {/* Main Content Area */}
       <main className="flex-1 overflow-hidden">
         {role === UserRole.ADMIN ? (
           <AdminDashboard 
             storeCatalog={storeCatalog} 
             onUpdateCatalog={setStoreCatalog} 
-            onBroadcastNotification={handleBroadcast}
+            onBroadcastNotification={(n) => handleUpdateBrain({...brain, notifications: [...(brain.notifications || []), n]})}
             config={gameConfig}
-            onUpdateConfig={setGameConfig}
+            onUpdateConfig={handleUpdateConfig}
           />
         ) : (
           <>
@@ -379,7 +413,7 @@ const App: React.FC = () => {
                <IlMercato 
                   onExit={() => setView('DASHBOARD')} 
                   brain={brain} 
-                  onUpdateBrain={setBrain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   catalog={storeCatalog} 
                   config={gameConfig}
                />
@@ -388,7 +422,7 @@ const App: React.FC = () => {
                <ExerciseSession 
                   onExit={() => setView('DASHBOARD')} 
                   brain={brain} 
-                  onUpdateBrain={setBrain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   config={gameConfig}
                />
             )}
@@ -396,7 +430,7 @@ const App: React.FC = () => {
                <BossFightSession 
                   onExit={() => setView('DASHBOARD')} 
                   brain={brain} 
-                  onUpdateBrain={setBrain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   config={gameConfig}
                />
             )}
@@ -404,7 +438,7 @@ const App: React.FC = () => {
                <StoryModeSession 
                   onExit={() => setView('DASHBOARD')} 
                   brain={brain} 
-                  onUpdateBrain={setBrain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   config={gameConfig}
                />
             )}
@@ -412,7 +446,7 @@ const App: React.FC = () => {
                <MilestoneSession 
                   onExit={() => setView('DASHBOARD')} 
                   brain={brain} 
-                  onUpdateBrain={setBrain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   targetTier={activeMilestoneTier}
                   config={gameConfig}
                />

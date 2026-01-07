@@ -1,20 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { generateExercise, generateStoreItemIdea, generateEmoji } from '../services/geminiService';
+import { getAllUsersAdmin } from '../services/supabaseService';
 import { Exercise, StoreItem, Notification, GlobalGameConfig } from '../types';
-import { VERB_DATABASE } from '../data/verbs'; // Import the database
-import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book } from 'lucide-react';
-
-// --- MOCK DATA FOR ADMIN DEMO (KPIs) ---
-const MOCK_USERS = [
-    {
-        id: '1', name: 'Giulia Rossi', email: 'giulia.r@example.com', level: 'A2', xp: 2450, verbsMastered: 42, streak: 12, status: 'ACTIVE', lastLogin: '2 horas atrás',
-        topGame: 'Conecte os Pares',
-        gameDistribution: [{ name: 'Pares', value: 60 }, { name: 'Binário', value: 30 }, { name: 'Intruso', value: 10 }],
-        weaknesses: ['Passato Prossimo (Auxiliares)', 'Verbos Reflexivos'],
-        strengths: ['Presente Regular', 'Vocabulário Casa']
-    },
-];
+import { VERB_DATABASE } from '../data/verbs'; 
+import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book, Clock } from 'lucide-react';
 
 interface AdminDashboardProps {
     storeCatalog?: StoreItem[];
@@ -27,6 +17,10 @@ interface AdminDashboardProps {
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUpdateCatalog, onBroadcastNotification, config, onUpdateConfig }) => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CONTENT' | 'USERS' | 'STORE' | 'GOD_MODE'>('CONTENT');
   
+  // Real Users State
+  const [realUsers, setRealUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+
   // Store Management State
   const [showEditor, setShowEditor] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -46,16 +40,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
   const [isEmojiGenerating, setIsEmojiGenerating] = useState(false);
 
   // God Mode State
-  // We use a local state for editing, then save to commit to parent
   const [localConfig, setLocalConfig] = useState<GlobalGameConfig | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
       if (config && !localConfig) {
           setLocalConfig(config);
       }
   }, [config]);
 
-  // --- HELPER: RESET FORM ---
+  // Load Users when tab changes to USERS
+  useEffect(() => {
+      if (activeTab === 'USERS') {
+          fetchUsers();
+      }
+  }, [activeTab]);
+
+  const fetchUsers = async () => {
+      setUsersLoading(true);
+      const data = await getAllUsersAdmin();
+      setRealUsers(data);
+      setUsersLoading(false);
+  };
+
   const resetForm = () => {
       setItemForm({ name: '', description: '', price: '1000', type: 'COLLECTIBLE', asset: '', categoryInput: '' });
       setEditingId(null);
@@ -91,11 +97,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
       const type = itemForm.type === 'CUSTOM' ? itemForm.categoryInput.toUpperCase() : itemForm.type;
       
       let updatedCatalog = [...storeCatalog];
-      let notifTitle = "";
-      let notifMsg = "";
 
       if (editingId) {
-          // Update existing
           updatedCatalog = updatedCatalog.map(i => i.id === editingId ? {
               ...i,
               name: itemForm.name,
@@ -105,7 +108,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
               asset: itemForm.asset
           } : i);
       } else {
-          // Create new
           const newItem: StoreItem = {
               id: `item_${Date.now()}`,
               name: itemForm.name,
@@ -117,14 +119,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
           };
           updatedCatalog.push(newItem);
           
-          // Notify Users
-          notifTitle = "Nuovo Arrivo! 🛍️";
-          notifMsg = `Chegou "${newItem.name}" no Mercado!`;
           if (onBroadcastNotification) {
               onBroadcastNotification({
                   id: `notif-${Date.now()}`,
-                  title: notifTitle,
-                  message: notifMsg,
+                  title: "Nuovo Arrivo! 🛍️",
+                  message: `Chegou "${newItem.name}" no Mercado!`,
                   type: 'NEW_ITEM',
                   timestamp: Date.now(),
                   read: false
@@ -164,13 +163,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
 
   const handlePromoClick = (item: StoreItem) => {
       if (item.promotion && item.promotion.endsAt > Date.now()) {
-          // Cancel Promo
           if (!onUpdateCatalog) return;
           onUpdateCatalog(storeCatalog.map(i => i.id === item.id ? { ...i, promotion: undefined } : i));
       } else {
-          // Open Promo Dialog
           setPromoId(item.id);
-          setPromoPercent(20); // Default
+          setPromoPercent(20); 
       }
   };
 
@@ -185,7 +182,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
                   ...i,
                   promotion: {
                       discountPercent: promoPercent,
-                      endsAt: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
+                      endsAt: Date.now() + 24 * 60 * 60 * 1000 
                   }
               };
           }
@@ -227,7 +224,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
       }
   };
 
-  // --- CONTENT FILTERING ---
   const filteredVerbs = VERB_DATABASE.filter(v => {
       const matchesSearch = v.infinitive.toLowerCase().includes(contentSearch.toLowerCase()) || 
                             v.translation.toLowerCase().includes(contentSearch.toLowerCase());
@@ -258,6 +254,72 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
         
+        {/* --- TAB: USERS (REAL DATA) --- */}
+        {activeTab === 'USERS' && (
+             <div className="space-y-6 animate-fade-in">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800">Gestão de Alunos</h1>
+                        <p className="text-slate-500">Acompanhamento em tempo real.</p>
+                    </div>
+                    <button onClick={fetchUsers} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded">
+                        <RefreshCw size={14} className={usersLoading ? 'animate-spin' : ''}/> Atualizar
+                    </button>
+                </div>
+
+                {usersLoading ? (
+                    <div className="flex justify-center py-20"><RefreshCw className="animate-spin text-slate-400" size={32} /></div>
+                ) : realUsers.length > 0 ? (
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <table className="min-w-full text-left text-sm">
+                            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-xs border-b border-slate-200">
+                                <tr>
+                                    <th className="py-4 px-6">Nome / Email</th>
+                                    <th className="py-4 px-6">Função</th>
+                                    <th className="py-4 px-6">Nível Atual</th>
+                                    <th className="py-4 px-6">Verbos Descobertos</th>
+                                    <th className="py-4 px-6">Último Acesso</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {realUsers.map((user) => {
+                                    const brain = user.brain || {};
+                                    return (
+                                        <tr key={user.id} className="hover:bg-slate-50 transition-colors">
+                                            <td className="py-4 px-6">
+                                                <div className="font-bold text-slate-800">{user.full_name || 'Sem nome'}</div>
+                                                <div className="text-xs text-slate-500">{user.email}</div>
+                                            </td>
+                                            <td className="py-4 px-6">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase
+                                                    ${user.role === 'ADMIN' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}
+                                                `}>
+                                                    {user.role}
+                                                </span>
+                                            </td>
+                                            <td className="py-4 px-6 font-bold text-slate-700">
+                                                {brain.currentLevel || 'A1'}
+                                            </td>
+                                            <td className="py-4 px-6">
+                                                {brain.verbHistory ? Object.keys(brain.verbHistory).length : 0}
+                                            </td>
+                                            <td className="py-4 px-6 text-slate-500 text-xs">
+                                                {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="text-center py-20 text-slate-400">
+                        Nenhum usuário encontrado no banco de dados.
+                    </div>
+                )}
+             </div>
+        )}
+
         {/* --- TAB: CONTENT (DATABASE VIEWER) --- */}
         {activeTab === 'CONTENT' && (
             <div className="space-y-6 animate-fade-in">
