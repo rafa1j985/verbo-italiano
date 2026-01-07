@@ -349,9 +349,9 @@ const App: React.FC = () => {
              {/* ADMIN SHORTCUT LINK */}
              <button
                onClick={() => {
-                   setAuthMode('REGISTER'); // Default to Register to solve "User not found" issue
+                   setAuthMode('LOGIN'); // Default to LOGIN now
                    setFormData({ name: 'Admin', email: 'rafaelvollpilates@gmail.com', password: '123456' });
-                   alert("Atenção: Se for o primeiro acesso, certifique-se de estar na aba 'CRIAR CADASTRO' para registrar o admin.");
+                   // Removed Alert
                }}
                className="text-[10px] text-slate-600 hover:text-emerald-500 transition-colors mt-4 uppercase tracking-widest opacity-50 hover:opacity-100 flex items-center gap-1"
              >
