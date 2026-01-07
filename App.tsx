@@ -9,6 +9,7 @@ import ExerciseSession from './components/ExerciseSession';
 import BossFightSession from './components/BossFightSession';
 import StoryModeSession from './components/StoryModeSession'; 
 import MilestoneSession from './components/MilestoneSession';
+import DetectiveSession from './components/DetectiveSession';
 import IlMercato from './components/IlMercato';
 import { LogIn, Activity, LayoutDashboard, BrainCircuit, UserPlus, ShieldAlert, Loader2, Lock, WifiOff, RefreshCcw, Cloud, CloudOff, CheckCircle } from 'lucide-react';
 import { STORE_CATALOG } from './data/storeItems';
@@ -37,7 +38,8 @@ const getInitialBrain = (): UserBrain => ({
   activeTheme: 'default',
   activeTitle: null,
   streakFreeze: 0,
-  notifications: []
+  notifications: [],
+  detectiveStats: { casesSolved: 0, lastCaseDate: 0, cluesFound: [] }
 });
 
 // --- DEFAULT GOD MODE CONFIG ---
@@ -99,7 +101,7 @@ const App: React.FC = () => {
   // App State
   const [userName, setUserName] = useState<string>('');
   const [role, setRole] = useState<UserRole | null>(null);
-  const [view, setView] = useState<'DASHBOARD' | 'SESSION' | 'BOSS_FIGHT' | 'STORY_MODE' | 'MILESTONE' | 'MERCATO'>('DASHBOARD');
+  const [view, setView] = useState<'DASHBOARD' | 'SESSION' | 'BOSS_FIGHT' | 'STORY_MODE' | 'MILESTONE' | 'MERCATO' | 'DETECTIVE'>('DASHBOARD');
   const [activeMilestoneTier, setActiveMilestoneTier] = useState<number>(0);
   
   // PERSISTENT BRAIN STATE - Initialize with factory function
@@ -502,6 +504,7 @@ const App: React.FC = () => {
                   onStartStory={() => setView('STORY_MODE')}
                   onStartMilestone={startMilestone}
                   onOpenMercato={() => setView('MERCATO')}
+                  onStartDetective={() => setView('DETECTIVE')}
                   brain={brain}
                   catalog={storeCatalog} 
                   config={gameConfig}
@@ -546,6 +549,14 @@ const App: React.FC = () => {
                   brain={brain} 
                   onUpdateBrain={handleUpdateBrain} 
                   targetTier={activeMilestoneTier}
+                  config={gameConfig}
+               />
+            )}
+            {view === 'DETECTIVE' && (
+               <DetectiveSession
+                  onExit={() => setView('DASHBOARD')} 
+                  brain={brain} 
+                  onUpdateBrain={handleUpdateBrain} 
                   config={gameConfig}
                />
             )}

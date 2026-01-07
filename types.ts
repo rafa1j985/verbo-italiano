@@ -98,15 +98,49 @@ export interface BossStats {
   hasMedal: boolean; // Corona di Alloro
 }
 
-export interface StoryEntry {
-  id: string;
-  date: number;
-  storyTitle: string;
-  storyText: string;
+// --- NOVEL / STORY MODE TYPES ---
+export type CharacterGender = 'MALE' | 'FEMALE';
+export type CharacterArchetype = 'DETECTIVE' | 'CHEF' | 'STUDENT';
+
+export interface StoryChapter {
+  chapterNumber: number;
+  title: string;
+  emoji: string; // Chapter Icon
+  textIt: string; // HTML with <b>verbs</b>
+  textPt: string;
+  summary: string; // Hidden summary for AI context continuity
+  userChoice?: string; // The choice user made at the end
   targetVerbs: string[];
-  ratingInterest: number; // 0-10
-  ratingComprehension: number; // 0-10
-  imageUrl?: string; // Base64 of generated image
+  date: number;
+}
+
+export interface NovelProgress {
+  gender: CharacterGender;
+  archetype: CharacterArchetype;
+  currentChapter: number;
+  plotSummary: string; // Accumulated context of the whole book
+  chapters: StoryChapter[];
+}
+
+// --- DETECTIVE MODE TYPES ---
+export interface DetectiveCase {
+  id: string;
+  title: string; // "Il Caso del Gelato Scomparso"
+  suspectStatement: string; // Italian text with grammar nuance
+  question: string; // "Why is he lying?"
+  difficulty: string;
+  options: Array<{
+    text: string;
+    isCorrect: boolean;
+    explanation: string;
+  }>;
+  rewardClue: string; // "Impronta Digitale", "Lupa", etc.
+}
+
+export interface DetectiveStats {
+  casesSolved: number;
+  lastCaseDate: number; // Timestamp of last played case
+  cluesFound: string[]; // List of collected clue names
 }
 
 // --- MILESTONE TYPES ---
@@ -131,8 +165,7 @@ export interface MilestoneExam {
 }
 
 // --- STORE TYPES ---
-// Expanded to allow dynamic string types for Admin custom categories
-export type StoreItemType = 'THEME' | 'POWERUP' | 'FLAG' | 'COLLECTIBLE' | 'TITLE' | 'CLOTHING' | string;
+export type StoreItemType = 'THEME' | 'POWERUP' | 'FLAG' | 'COLLECTIBLE' | 'TITLE' | 'CLOTHING' | 'SPECIAL' | string;
 
 export interface StoreItem {
   id: string;
@@ -169,9 +202,15 @@ export interface UserBrain {
   safetyNetActive: number; 
   introducedTopics: string[];
   bossStats?: BossStats; 
-  verbsSinceLastStory: number; 
-  storyHistory: StoryEntry[]; 
   
+  // Story Mode -> Now Novel Mode
+  verbsSinceLastStory: number; 
+  novelData?: NovelProgress; // NEW: Replaces storyHistory array
+  storyHistory?: any[]; // Deprecated, kept for backward compat if needed
+  
+  // Detective Mode
+  detectiveStats?: DetectiveStats;
+
   // Milestone Tracking
   milestoneHistory: MilestoneEntry[];
   lastMilestoneFail: number; // Timestamp for cooldown

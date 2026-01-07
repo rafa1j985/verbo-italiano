@@ -2,6 +2,17 @@
 import { StoreItem } from '../types';
 
 export const STORE_CATALOG: StoreItem[] = [
+    // --- SPECIAL ITEMS ---
+    {
+        id: 'license_detective',
+        name: 'Licenza Investigativa',
+        description: 'Desbloqueia o modo "L\'Ispettore". Resolva crimes gramaticais diários.',
+        price: 2000,
+        type: 'SPECIAL',
+        asset: '🕵️‍♂️',
+        isActive: true
+    },
+
     // --- THEMES (Visuals updated to Landscapes, Styles moved to themeSkin) ---
     {
         id: 'theme_toscana',

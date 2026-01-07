@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Play, Zap, Target, BookOpen, Brain, TrendingUp, Lock, Award, Star, Swords, Skull, Clock, ShieldCheck, Trophy, Library, ShoppingBag, LayoutGrid, Bell, Image as ImageIcon } from 'lucide-react';
-import { UserBrain, LevelStats, StoreItem, GlobalGameConfig } from '../types';
+import { Play, Zap, Target, BookOpen, Brain, TrendingUp, Lock, Award, Star, Swords, Skull, Clock, ShieldCheck, Trophy, Library, ShoppingBag, LayoutGrid, Bell, Image as ImageIcon, Feather, Search, AlertCircle } from 'lucide-react';
+import { UserBrain, LevelStats, StoreItem, GlobalGameConfig, StoryChapter } from '../types';
 import { VERB_DATABASE } from '../data/verbs';
 
 interface StudentDashboardProps {
@@ -11,12 +11,13 @@ interface StudentDashboardProps {
   onStartStory: () => void;
   onStartMilestone: (tier: number) => void;
   onOpenMercato: () => void;
+  onStartDetective: () => void; // NEW
   brain: UserBrain;
   catalog: StoreItem[]; 
   config: GlobalGameConfig;
 }
 
-const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTraining, onStartBoss, onStartStory, onStartMilestone, onOpenMercato, brain, catalog, config }) => {
+const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTraining, onStartBoss, onStartStory, onStartMilestone, onOpenMercato, onStartDetective, brain, catalog, config }) => {
   
   // DYNAMIC CALCULATION OF STATS
   const currentLevel = brain.currentLevel;
@@ -52,7 +53,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
   const verbsSinceStory = brain.verbsSinceLastStory || 0;
   const storyProgress = Math.min((verbsSinceStory / STORY_UNLOCK_COUNT) * 100, 100);
   const isStoryReady = verbsSinceStory >= STORY_UNLOCK_COUNT;
-  const storiesUnlocked = brain.storyHistory?.length || 0;
+  // Novel Logic
+  const novelChapters = brain.novelData?.chapters || [];
+  const currentChapterNum = (brain.novelData?.currentChapter || 0) + 1;
 
   // MILESTONE LOGIC (DYNAMIC CONFIG)
   const achievedTiers = brain.milestoneHistory?.map(m => m.tier) || [];
@@ -70,13 +73,21 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
   const msTimeLeft = Math.max(0, MILESTONE_COOLDOWN - (Date.now() - (brain.lastMilestoneFail || 0)));
   const msMinutesLeft = Math.ceil(msTimeLeft / 60000);
 
+  // DETECTIVE LOGIC
+  const hasLicense = brain.inventory?.includes('license_detective');
+  const isLevelEligible = brain.currentLevel !== 'A1';
+  const lastDetectiveCase = brain.detectiveStats?.lastCaseDate || 0;
+  // 24 hours cooldown for detective cases
+  const isDetectiveCooldown = (Date.now() - lastDetectiveCase) < 24 * 60 * 60 * 1000;
+  const detectiveHoursLeft = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - lastDetectiveCase)) / (1000 * 60 * 60));
+
   // TITLE LOGIC
   const activeTitleObj = brain.activeTitle ? catalog.find(i => i.id === brain.activeTitle) : null;
 
   // TROPHY ROOM LOGIC
   // Filter inventory for visual items (Flags, Collectibles, Clothing, Custom)
   const collectionItems = (brain.inventory || []).map(id => catalog.find(i => i.id === id)).filter(item => 
-      item && (item.type === 'FLAG' || item.type === 'COLLECTIBLE' || item.type === 'CLOTHING' || (!['THEME', 'TITLE', 'POWERUP'].includes(item.type)))
+      item && (item.type === 'FLAG' || item.type === 'COLLECTIBLE' || item.type === 'CLOTHING' || (!['THEME', 'TITLE', 'POWERUP', 'SPECIAL'].includes(item.type)))
   ) as StoreItem[];
 
   // Boss Countdown timer
@@ -87,7 +98,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
   const unreadCount = brain.notifications ? brain.notifications.filter(n => !n.read).length : 0;
 
   // Gallery Preview State
-  const [selectedStory, setSelectedStory] = useState<any | null>(null);
+  const [selectedChapter, setSelectedChapter] = useState<StoryChapter | null>(null);
 
   useEffect(() => {
     if (isCooldownActive) {
@@ -258,7 +269,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
         <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
       </div>
 
-      {/* 2. PROGRESSO & META DIÁRIA & STORY MODE & MILESTONE */}
+      {/* 2. PROGRESSO & META DIÁRIA & STORY MODE & DETECTIVE */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* Card: Nível Atual */}
@@ -286,39 +297,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
                         style={{ width: `${levelProgress}%` }}
                     ></div>
                 </div>
-                <div className="text-[10px] text-slate-400 text-right">
-                    {masteredInLevel} / {totalVerbsInLevel} verbos
-                </div>
             </div>
         </div>
 
-        {/* Card: Inventário de Verbos */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex justify-between items-start mb-4">
-                <div>
-                    <h2 className="text-slate-500 text-xs font-bold uppercase tracking-wide">Inventário Neural</h2>
-                    <div className="text-3xl font-serif font-bold text-slate-800 mt-1">
-                        {verbsDiscoveredCount} <span className="text-base text-slate-400 font-sans font-normal">Verbos</span>
-                    </div>
-                </div>
-                <div className="p-2 bg-slate-100 rounded-lg text-slate-400">
-                    <BookOpen size={24} />
-                </div>
-            </div>
-            
-            <div className="mt-auto">
-                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
-                    {Object.keys(brain.verbHistory).reverse().slice(0, 20).map(v => (
-                        <span key={v} className="text-xs px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md border border-indigo-100 font-medium">
-                            {v}
-                        </span>
-                    ))}
-                    {verbsDiscoveredCount === 0 && <span className="text-xs text-slate-400">Nenhum verbo ainda.</span>}
-                </div>
-            </div>
-        </div>
-
-        {/* Card: STORY MODE (FIXED FONT SIZE ISSUE) */}
+        {/* Card: STORY MODE (NOVEL) */}
         <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between relative overflow-hidden transition-all
             ${isStoryReady ? 'bg-purple-600 border-purple-700 text-white cursor-pointer hover:scale-[1.02]' : 'bg-white border-slate-200'}
         `}
@@ -326,14 +308,13 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
         >
             <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
-                    <h2 className={`text-xs font-bold uppercase tracking-wide ${isStoryReady ? 'text-purple-100' : 'text-slate-500'}`}>Story Mode</h2>
+                    <h2 className={`text-xs font-bold uppercase tracking-wide ${isStoryReady ? 'text-purple-100' : 'text-slate-500'}`}>Il Tuo Romanzo</h2>
                     <div className={`font-serif font-bold mt-1 ${isStoryReady ? 'text-white text-lg tracking-wider' : 'text-slate-800 text-3xl'}`}>
-                        {isStoryReady ? 'DESBLOQUEADO' : `${verbsSinceStory} / ${STORY_UNLOCK_COUNT}`} 
-                        {!isStoryReady && <span className="text-base text-slate-400 font-sans font-normal"> Verbos</span>}
+                        {isStoryReady ? 'CAPÍTULO PRONTO' : `Capítulo ${currentChapterNum}`} 
                     </div>
                 </div>
                 <div className={`p-2 rounded-lg ${isStoryReady ? 'bg-purple-500 text-white' : 'bg-purple-50 text-purple-400'}`}>
-                    <BookOpen size={24} />
+                    <Feather size={24} />
                 </div>
             </div>
             
@@ -343,13 +324,13 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
                         onClick={(e) => { e.stopPropagation(); onStartStory(); }}
                         className="w-full bg-white text-purple-700 font-bold py-2 rounded-lg shadow-sm hover:bg-purple-50 transition-colors flex items-center justify-center gap-2"
                      >
-                         <Play size={16} fill="currentColor"/> Iniciar História
+                         <Play size={16} fill="currentColor"/> Escrever Capítulo
                      </button>
                  ) : (
                      <div className="space-y-2">
                         <div className="flex justify-between text-xs text-slate-400 font-medium">
-                             <span>Próxima história em...</span>
-                             <span>{STORY_UNLOCK_COUNT - verbsSinceStory} verbos *</span>
+                             <span>Próximo capítulo em...</span>
+                             <span>{STORY_UNLOCK_COUNT - verbsSinceStory} verbos</span>
                         </div>
                         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                              <div 
@@ -357,17 +338,59 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
                                  style={{ width: `${storyProgress}%` }}
                              ></div>
                         </div>
-                        <p className="text-[10px] text-slate-400 leading-tight">
-                            * Contabiliza apenas verbos distintos dominados.
-                        </p>
                      </div>
                  )}
-                 {/* Library Counter */}
-                 {storiesUnlocked > 0 && (
-                     <div className="mt-3 flex items-center gap-2 text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-md w-fit">
-                         <Library size={12} /> {storiesUnlocked}
-                     </div>
-                 )}
+            </div>
+        </div>
+
+        {/* Card: DETECTIVE MODE */}
+        <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between relative overflow-hidden transition-all
+            ${!isLevelEligible ? 'bg-slate-100 border-slate-200 opacity-80' : 
+              !hasLicense ? 'bg-slate-50 border-slate-200' :
+              isDetectiveCooldown ? 'bg-white border-slate-200' :
+              'bg-slate-900 border-slate-800 text-white cursor-pointer hover:shadow-xl hover:scale-[1.02]'
+            }
+        `}
+        onClick={() => {
+            if (!isLevelEligible) return;
+            if (!hasLicense) { onOpenMercato(); return; }
+            if (!isDetectiveCooldown) onStartDetective();
+        }}
+        >
+            <div className="flex justify-between items-start mb-4 relative z-10">
+                <div>
+                    <h2 className={`text-xs font-bold uppercase tracking-wide ${!isLevelEligible || !hasLicense || isDetectiveCooldown ? 'text-slate-500' : 'text-slate-300'}`}>
+                        L'Ispettore
+                    </h2>
+                    <div className={`font-serif font-bold mt-1 text-xl ${!isLevelEligible || !hasLicense || isDetectiveCooldown ? 'text-slate-700' : 'text-white'}`}>
+                        {!isLevelEligible ? 'Requer Nível A2' : 
+                         !hasLicense ? 'Sem Licença' :
+                         isDetectiveCooldown ? 'Investigando...' : 'Dossier Aberto'}
+                    </div>
+                </div>
+                <div className={`p-2 rounded-lg ${!isLevelEligible ? 'bg-slate-200 text-slate-400' : !hasLicense ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-800 text-white'}`}>
+                    {!isLevelEligible ? <Lock size={24} /> : !hasLicense ? <AlertCircle size={24}/> : <Search size={24} />}
+                </div>
+            </div>
+            
+            <div className="relative z-10">
+                {!isLevelEligible ? (
+                    <div className="text-xs text-slate-400 font-medium flex items-center gap-1">
+                        <TrendingUp size={12}/> Evolua para desbloquear
+                    </div>
+                ) : !hasLicense ? (
+                    <button className="w-full bg-yellow-500 text-white font-bold py-2 rounded-lg shadow-sm hover:bg-yellow-600 transition-colors text-xs flex items-center justify-center gap-2">
+                        <ShoppingBag size={14} /> Comprar Licença
+                    </button>
+                ) : isDetectiveCooldown ? (
+                    <div className="text-xs font-bold text-slate-500 flex items-center gap-1 bg-slate-100 p-2 rounded justify-center">
+                        <Clock size={12} /> Próximo caso em {detectiveHoursLeft}h
+                    </div>
+                ) : (
+                    <button className="w-full bg-white text-slate-900 font-bold py-2 rounded-lg shadow-sm hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 animate-pulse text-sm">
+                        <Search size={16} /> Resolver Caso
+                    </button>
+                )}
             </div>
         </div>
 
@@ -416,7 +439,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
                 </div>
             </div>
         ) : (
-            // Completed all milestones (unlikely with dynamic generation, but fallback)
+            // Completed all milestones
             <div className="bg-amber-50 p-6 rounded-2xl border border-amber-200 shadow-sm flex flex-col justify-center items-center text-center">
                 <Trophy size={40} className="text-amber-500 mb-2" />
                 <h3 className="font-bold text-amber-800">Lenda Viva</h3>
@@ -425,71 +448,72 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
         )}
       </div>
 
-      {/* 3. GALLERIA DELLE STORIE (Visual Memory Gallery) */}
+      {/* 3. IL TUO GRANDE ROMANZO (CHAPTER TIMELINE) */}
       <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
               <div className="p-3 bg-purple-50 rounded-full text-purple-600">
-                  <ImageIcon size={24} />
+                  <Feather size={24} />
               </div>
               <div>
-                  <h2 className="text-2xl font-serif font-bold text-slate-800">Galleria delle Storie</h2>
-                  <p className="text-slate-500 text-sm">Suas memórias visuais criadas pela IA.</p>
+                  <h2 className="text-2xl font-serif font-bold text-slate-800">Il Tuo Grande Romanzo</h2>
+                  <p className="text-slate-500 text-sm">A história que você escreve a cada verbo aprendido.</p>
               </div>
           </div>
 
-          {brain.storyHistory && brain.storyHistory.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {brain.storyHistory.slice().reverse().map((story, idx) => (
-                      <div 
-                        key={story.id} 
-                        className="group bg-slate-50 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all cursor-pointer border border-slate-100"
-                        onClick={() => setSelectedStory(story)}
-                      >
-                          <div className="aspect-[4/3] bg-slate-200 relative overflow-hidden">
-                              {story.imageUrl ? (
-                                  <img src={story.imageUrl} alt={story.storyTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                              ) : (
-                                  <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-100">
-                                      <ImageIcon size={32} className="mb-2 opacity-50" />
-                                      <span className="text-[10px] font-bold uppercase tracking-widest">Sem Imagem</span>
+          {novelChapters.length > 0 ? (
+              <div className="relative">
+                  {/* Timeline Line */}
+                  <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-slate-100"></div>
+                  
+                  <div className="space-y-6">
+                      {novelChapters.slice().reverse().map((chapter) => (
+                          <div 
+                            key={chapter.chapterNumber} 
+                            onClick={() => setSelectedChapter(chapter)}
+                            className="relative pl-20 cursor-pointer group"
+                          >
+                              {/* Icon Node */}
+                              <div className="absolute left-4 top-0 w-9 h-9 bg-white border-2 border-purple-100 rounded-full flex items-center justify-center text-xl shadow-sm z-10 group-hover:scale-110 group-hover:border-purple-300 transition-all">
+                                  {chapter.emoji}
+                              </div>
+                              
+                              <div className="bg-slate-50 p-5 rounded-xl border border-slate-100 group-hover:bg-white group-hover:shadow-md transition-all">
+                                  <div className="flex justify-between items-start mb-2">
+                                      <h3 className="font-serif font-bold text-slate-800 text-lg group-hover:text-purple-700">
+                                          Capitolo {chapter.chapterNumber}: {chapter.title}
+                                      </h3>
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                          {new Date(chapter.date).toLocaleDateString()}
+                                      </span>
                                   </div>
-                              )}
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                                  <span className="text-white text-xs font-bold">Ver Detalhes</span>
+                                  <p className="text-slate-600 text-sm line-clamp-2 italic mb-3">
+                                      "{chapter.summary}"
+                                  </p>
+                                  <div className="flex items-center gap-2 text-xs font-bold text-purple-600 bg-purple-50 px-3 py-1 rounded-full w-fit">
+                                      <TrendingUp size={12} /> Decisão: {chapter.userChoice}
+                                  </div>
                               </div>
                           </div>
-                          <div className="p-4">
-                              <h3 className="font-bold text-slate-800 text-sm line-clamp-1">{story.storyTitle}</h3>
-                              <div className="flex justify-between items-center mt-2">
-                                  <span className="text-[10px] text-slate-400">{new Date(story.date).toLocaleDateString()}</span>
-                                  <div className="flex gap-1">
-                                      {[...Array(Math.round(story.ratingInterest/2))].map((_, i) => <Star key={i} size={10} className="text-amber-400 fill-amber-400"/>)}
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  ))}
+                      ))}
+                  </div>
               </div>
           ) : (
               <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <BookOpen size={48} className="mx-auto text-slate-300 mb-4" />
-                  <p className="text-slate-500 font-medium">Nenhuma história visual encontrada.</p>
+                  <p className="text-slate-500 font-medium">Seu livro ainda está em branco.</p>
                   
                   {isStoryReady ? (
                       <button 
                         onClick={onStartStory}
                         className="mt-4 bg-purple-600 hover:bg-purple-500 text-white px-6 py-2 rounded-full font-bold text-sm shadow-lg shadow-purple-900/20 transition-all animate-pulse flex items-center justify-center gap-2 mx-auto"
                       >
-                          <Play size={16} fill="currentColor" /> Reivindicar História Disponível
+                          <Feather size={16} fill="currentColor" /> Escrever Capítulo 1
                       </button>
                   ) : (
                       <div className="mt-4 flex flex-col items-center gap-2">
                            <div className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-widest border border-slate-200">
                                 {verbsSinceStory}/{STORY_UNLOCK_COUNT} Verbos para desbloqueio
                            </div>
-                           <p className="text-xs text-slate-400 max-w-xs">
-                               Domine mais verbos para gerar sua primeira memória visual.
-                           </p>
                       </div>
                   )}
               </div>
@@ -521,12 +545,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
                           <div className="text-xs text-slate-500 text-center font-serif leading-tight mt-1">
                               {item.name}
                           </div>
-                          {/* Shine effect */}
                           <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none rounded-xl"></div>
                       </div>
                   ))}
                   
-                  {/* Empty Slot Placeholder */}
                   {[...Array(Math.max(0, 6 - collectionItems.length))].map((_, i) => (
                       <div key={`empty-${i}`} className="border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center h-32 text-slate-300">
                           <div className="w-8 h-8 rounded-full bg-slate-100"></div>
@@ -544,25 +566,30 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
           )}
       </div>
 
-      {/* STORY DETAIL MODAL */}
-      {selectedStory && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedStory(null)}>
-              <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                  <div className="relative h-64 bg-slate-900">
-                      {selectedStory.imageUrl && (
-                          <img src={selectedStory.imageUrl} className="w-full h-full object-cover" alt="Story" />
-                      )}
-                      <button onClick={() => setSelectedStory(null)} className="absolute top-4 right-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70">
-                          <LayoutGrid size={20} />
-                      </button>
-                  </div>
-                  <div className="p-8">
-                      <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">{selectedStory.storyTitle}</h2>
-                      <div className="prose prose-slate mb-6">
-                          <p dangerouslySetInnerHTML={{ __html: selectedStory.storyText }}></p>
+      {/* CHAPTER READER MODAL */}
+      {selectedChapter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedChapter(null)}>
+              <div className="bg-[#fdfbf7] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => setSelectedChapter(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+                      <LayoutGrid size={24} />
+                  </button>
+                  
+                  <div className="p-10">
+                      <div className="text-center mb-8">
+                          <div className="text-6xl mb-4">{selectedChapter.emoji}</div>
+                          <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Capitolo {selectedChapter.chapterNumber}</div>
+                          <h2 className="text-3xl font-serif font-bold text-slate-900 leading-tight">{selectedChapter.title}</h2>
                       </div>
-                      <div className="flex gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                          <span>Verbos: {selectedStory.targetVerbs.join(", ")}</span>
+                      
+                      <div className="prose prose-lg prose-slate font-serif text-slate-700 leading-loose mb-8">
+                          <p dangerouslySetInnerHTML={{ __html: selectedChapter.textIt }}></p>
+                      </div>
+
+                      <div className="border-t border-[#e5e0d8] pt-6 mt-8">
+                          <h4 className="text-xs font-bold uppercase tracking-widest text-purple-600 mb-2">Sua Decisão</h4>
+                          <p className="text-lg font-serif italic text-slate-800">
+                              "{selectedChapter.userChoice}"
+                          </p>
                       </div>
                   </div>
               </div>
