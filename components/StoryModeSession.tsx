@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { UserBrain, GlobalGameConfig } from '../types';
 import { generateStory, playTextToSpeech, generateIllustration } from '../services/geminiService';
@@ -45,7 +46,7 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       if (loading) {
           interval = setInterval(() => {
               setLoadingStepIndex(prev => (prev + 1) % WRITER_STEPS.length);
-          }, 2500); // Change message every 2.5s
+          }, 2000); // Change message every 2s
       }
       return () => clearInterval(interval);
   }, [loading]);
@@ -54,31 +55,37 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
     setLoading(true);
     setError(null);
     setLoadingStepIndex(0);
-    setGeneratedImage(null); // Reset image
+    setGeneratedImage(null); 
 
     try {
-        // 1. Select Verbs (Logic: Recent & Hardest)
+        // 1. Select Verbs
         const allVerbs = Object.keys(brain.verbHistory);
         const sortedVerbs = allVerbs.sort((a, b) => brain.verbHistory[b].lastSeen - brain.verbHistory[a].lastSeen);
         const recentVerbs = sortedVerbs.slice(0, 5);
         setTargetVerbs(recentVerbs);
         
-        // 2. Generate Text (FAST) - Using Flash Model
-        // This should take ~2-4 seconds.
-        const data = await generateStory(recentVerbs, brain.currentLevel);
+        // 2. THEATRICAL DELAY (The Parachute)
+        // Force at least 4 seconds of "Acting" so the user feels the experience
+        const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+        
+        // 3. Generate Content (Parallel)
+        const contentPromise = generateStory(recentVerbs, brain.currentLevel);
+        
+        // Wait for both timer AND content
+        const [_, data] = await Promise.all([minWait, contentPromise]);
         
         if (data) {
             setStory(data);
-            setLoading(false); // UNBLOCK UI IMMEDIATELY
+            setLoading(false); // UNBLOCK UI
             
-            // 3. Trigger Image Generation (BACKGROUND/ASYNC)
-            // This does NOT block the user from reading.
+            // 4. Trigger Image (Background)
             generateImageAsync(data.storyText);
         } else {
             throw new Error("O escritor falhou ao criar a trama.");
         }
     } catch (err) {
         console.error(err);
+        // Fallback allows user to exit, but theoretically generateStory should never return null now.
         setError("Não foi possível criar a história. A IA pode estar sobrecarregada.");
         setLoading(false);
     }
@@ -86,8 +93,6 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
 
   const generateImageAsync = async (text: string) => {
       setIsGeneratingImage(true);
-      // We don't await this in the main thread (it's called without await in loadStory)
-      // But inside this async function, we await the API.
       const imgBase64 = await generateIllustration(text);
       if (imgBase64) {
           setGeneratedImage(imgBase64);

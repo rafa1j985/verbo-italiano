@@ -292,47 +292,49 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
 export const generateStory = async (targetVerbs: string[], level: string) => {
     const verbsToUse = targetVerbs.length > 0 ? targetVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
 
-    const storySchema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING },
-            storyText: { type: Type.STRING },
-            translation: { type: Type.STRING }
-        },
-        required: ["title", "storyText", "translation"]
-    };
-
+    // REMOVED STRICT SCHEMA (Was causing Flash model to 400 Bad Request instantly)
+    // We rely on responseMimeType: application/json and the prompt instructions.
+    
     const prompt = `Act as a creative Italian novelist. Write a SHORT, engaging Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
+    
     Requirements:
     - Focus on a specific Italian cultural setting (e.g. A busy café in Napoli, A traffic jam in Rome).
     - Use all verbs in the list naturally.
     - Wrap the target verbs in <b> tags within the Italian text (e.g., "Lui <b>mangia</b> la pizza").
     - Provide a Portuguese translation.
-    - Return strictly JSON.
-    - KEEP IT CONCISE (Max 150 words) to ensure fast generation.`;
+    - KEEP IT CONCISE (Max 150 words).
+    
+    RETURN STRICT JSON ONLY:
+    {
+      "title": "Italian Title",
+      "storyText": "Italian text with html bold tags...",
+      "translation": "Portuguese translation..."
+    }`;
     
     try {
-        // Use flash model for speed
         const result = await getAi().models.generateContent({
             model: "gemini-3-flash-preview", 
             contents: [{ parts: [{ text: prompt }] }],
             config: { 
                 responseMimeType: "application/json",
-                responseSchema: storySchema,
                 temperature: 0.8 
             }
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         
-        if(!text) {
-             console.error("Story Generation returned empty text.");
-             return null;
-        }
+        if(!text) throw new Error("Empty text from AI");
         
         return JSON.parse(cleanJSON(text));
     } catch (e) { 
         console.error("Story Generation Failed:", e);
-        return null; 
+        
+        // --- FALLBACK STORY (THE PARACHUTE) ---
+        // Prevents the user from seeing an error screen.
+        return {
+            title: "Una Giornata Imprevista",
+            storyText: `Oggi è una giornata strana. Io <b>${verbsToUse[0] || 'vado'}</b> al mercato, ma non trovo nulla. Poi, Maria <b>${verbsToUse[1] || 'chiama'}</b> e dice che non può venire. Allora io <b>${verbsToUse[2] || 'torno'}</b> a casa triste. Ma alla fine, tutti noi <b>${verbsToUse[3] || 'mangiamo'}</b> una pizza insieme e <b>${verbsToUse[4] || 'siamo'}</b> felici.`,
+            translation: `Hoje é um dia estranho. Eu vou ao mercado, mas não encontro nada. Depois, Maria liga e diz que não pode vir. Então eu volto para casa triste. Mas no final, todos nós comemos uma pizza juntos e estamos felizes.`
+        };
     }
 };
 
