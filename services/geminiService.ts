@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { Exercise, Feedback, ErrorCategory, VerbLessonSession, ExerciseType, BossExam, MilestoneExam, VerbState, StoreItem } from "../types";
+import { Exercise, Feedback, ErrorCategory, VerbLessonSession, ExerciseType, BossExam, MilestoneExam, VerbState, StoreItem, GlobalGameConfig } from "../types";
 import { VERB_DATABASE, VerbEntry } from "../data/verbs";
 import { generateLocalLesson } from "./localExerciseService";
 import { conjugateRegular, FULL_PASSATO_PROSSIMO_DB } from "../data/conjugationRules"; // Import local conjugator
@@ -10,42 +10,49 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const modelName = "gemini-3-flash-preview"; 
 const ttsModelName = "gemini-2.5-flash-preview-tts";
-const imageModelName = "imagen-4.0-generate-001"; // High quality image generation
+const imageModelName = "imagen-3.0-generate-001"; // High quality image generation
 
 const timeoutPromise = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error("Request Timed Out")), ms));
 
+// ... (KEEP ALL EXISTING FUNCTIONS UNCHANGED: Audio Logic, enrichPracticeSentences, sanitizeConjugation, etc.) ...
+
 // --- WEIGHTED LEVEL SELECTION LOGIC ---
-const selectTargetLevel = (userCurrentLevel: string): string => {
+const selectTargetLevel = (userCurrentLevel: string, config?: GlobalGameConfig): string => {
     const rand = Math.random() * 100;
+    
+    // Default probabilities if no config provided (Safe fallback)
+    const probs = config?.probabilities || {
+         levelA2: { a1: 15, a2: 85 },
+         levelB1: { a1: 15, a2: 15, b1: 70 },
+         levelB2: { a1: 10, a2: 15, b1: 15, b2: 60 },
+         levelC1: { a1: 10, a2: 10, b1: 15, b2: 15, c1: 50 }
+    };
 
     switch (userCurrentLevel) {
         case 'A1':
             return 'A1'; // 100% A1
         
         case 'A2':
-            // 15% A1, 85% A2
-            if (rand < 15) return 'A1';
+            if (rand < probs.levelA2.a1) return 'A1';
             return 'A2';
 
         case 'B1':
-            // 15% A1, 15% A2, 70% B1
-            if (rand < 15) return 'A1';
-            if (rand < 30) return 'A2';
+            if (rand < probs.levelB1.a1) return 'A1';
+            if (rand < probs.levelB1.a1 + probs.levelB1.a2) return 'A2';
             return 'B1';
 
         case 'B2':
-            // 10% A1, 15% A2, 15% B1, 60% B2
-            if (rand < 10) return 'A1';
-            if (rand < 25) return 'A2';
-            if (rand < 40) return 'B1';
+            if (rand < probs.levelB2.a1) return 'A1';
+            if (rand < probs.levelB2.a1 + probs.levelB2.a2) return 'A2';
+            if (rand < probs.levelB2.a1 + probs.levelB2.a2 + probs.levelB2.b1) return 'B1';
             return 'B2';
 
         case 'C1':
-            // 10% A1, 10% A2, 15% B1, 15% B2, 50% C1
-            if (rand < 10) return 'A1';
-            if (rand < 20) return 'A2';
-            if (rand < 35) return 'B1';
-            if (rand < 50) return 'B2';
+             // Simplification for brevity, following config logic
+            if (rand < probs.levelC1.a1) return 'A1';
+            if (rand < probs.levelC1.a1 + probs.levelC1.a2) return 'A2';
+            if (rand < probs.levelC1.a1 + probs.levelC1.a2 + probs.levelC1.b1) return 'B1';
+            if (rand < probs.levelC1.a1 + probs.levelC1.a2 + probs.levelC1.b1 + probs.levelC1.b2) return 'B2';
             return 'C1';
 
         default:
@@ -53,9 +60,9 @@ const selectTargetLevel = (userCurrentLevel: string): string => {
     }
 };
 
-const getRandomVerb = (userLevel: string = 'A1', excludeList: string[] = []): VerbEntry => {
+const getRandomVerb = (userLevel: string = 'A1', excludeList: string[] = [], config?: GlobalGameConfig): VerbEntry => {
   // 1. Determine which bucket (level) to pull from based on the percentages
-  const targetBucket = selectTargetLevel(userLevel);
+  const targetBucket = selectTargetLevel(userLevel, config);
 
   // 2. Filter verbs belonging to that specific bucket
   let eligibleVerbs = VERB_DATABASE.filter(v => v.level === targetBucket);
@@ -203,7 +210,7 @@ export const playTextToSpeech = async (text: string) => {
 
 // --- CACHE SYSTEM (The "Brain" Storage) ---
 const CACHE_KEY = "VERBOVIVO_SENTENCE_BANK_V1";
-const MIN_CACHE_SIZE_BEFORE_SKIP_AI = 50; // RULE: Only skip AI if we have > 50 sentences
+// We will use config.rules.audioCacheLimit in logic below, or default to 50
 
 interface CachedSentence {
     context: string;
@@ -247,18 +254,18 @@ const saveToBank = (verb: string, sentences: CachedSentence[]) => {
 };
 
 // Get Random Sentences from Bank
-const getFromBank = (verb: string, count: number): CachedSentence[] | null => {
+const getFromBank = (verb: string, count: number, minCacheSize: number = 50): CachedSentence[] | null => {
     const bank = loadSentenceBank();
     const sentences = bank[verb];
     
-    // STRICT RULE: Only use cache if we have more than 50 items
-    if (sentences && sentences.length > MIN_CACHE_SIZE_BEFORE_SKIP_AI) {
+    // STRICT RULE: Only use cache if we have more than minCacheSize items
+    if (sentences && sentences.length > minCacheSize) {
         // Shuffle and pick 'count'
         const shuffled = [...sentences].sort(() => 0.5 - Math.random());
-        console.log(`[Cache] HIT for ${verb}. Using local memory (>50 items).`);
+        console.log(`[Cache] HIT for ${verb}. Using local memory (>${minCacheSize} items).`);
         return shuffled.slice(0, count);
     }
-    console.log(`[Cache] MISS for ${verb}. Cache size: ${sentences?.length || 0}/50. Forcing AI generation.`);
+    console.log(`[Cache] MISS for ${verb}. Cache size: ${sentences?.length || 0}/${minCacheSize}. Forcing AI generation.`);
     return null;
 };
 
@@ -267,11 +274,13 @@ const getFromBank = (verb: string, count: number): CachedSentence[] | null => {
 // This is called immediately when a lesson loads to replace generic templates with AI sentences
 export const enrichPracticeSentences = async (
     verb: string,
-    level: string
+    level: string,
+    config?: GlobalGameConfig
 ): Promise<Array<{context: string, sentenceStart: string, sentenceEnd: string, correctAnswer: string}> | null> => {
     
-    // 1. CHECK CACHE FIRST (Respecting the > 50 rule)
-    const cached = getFromBank(verb, 2);
+    // 1. CHECK CACHE FIRST (Respecting the > 50 rule from config)
+    const limit = config?.rules.audioCacheLimit || 50;
+    const cached = getFromBank(verb, 2, limit);
     if (cached) {
         return cached;
     }
@@ -379,21 +388,21 @@ export const generateBatchLessons = async (
   level: string,
   count: number = 2,
   progress: number = 0,
-  verbHistory: Record<string, VerbState> = {}
+  verbHistory: Record<string, VerbState> = {},
+  config?: GlobalGameConfig
 ): Promise<VerbLessonSession[]> => {
   
   // SPIRAL LEARNING LOGIC FOR BATCH
-  // Even in batch, we try to apply the logic:
-  // 1. Identify "Mastered" verbs (consecutiveCorrect >= 2)
-  // 2. Identify "New" verbs.
-  
+  const triggerProgress = config?.probabilities.spiralTriggerProgress || 40;
+  const spiralChance = config?.probabilities.spiralLearningChance || 0.6;
+
   const masteredVerbs = Object.keys(verbHistory).filter(v => {
       // Find verb object to check level match
       const dbEntry = VERB_DATABASE.find(db => db.infinitive.toLowerCase() === v.toLowerCase());
       return dbEntry && dbEntry.level === level && verbHistory[v].consecutiveCorrect >= 2;
   });
 
-  const usePassatoProssimo = progress > 40 && masteredVerbs.length > 0 && Math.random() > 0.4;
+  const usePassatoProssimo = progress > triggerProgress && masteredVerbs.length > 0 && Math.random() < spiralChance;
   
   let targetVerbForPrompt = "";
   let targetTense = "Presente Indicativo";
@@ -552,10 +561,14 @@ export const generateLesson = async (
     level: string, 
     progress: number = 0,
     recentVerbs: string[] = [],
-    verbHistory: Record<string, VerbState> = {}
+    verbHistory: Record<string, VerbState> = {},
+    config?: GlobalGameConfig
 ): Promise<VerbLessonSession> => {
     
     // SPIRAL LEARNING LOGIC (Smart Tense Selection)
+    const triggerProgress = config?.probabilities.spiralTriggerProgress || 40;
+    const spiralChance = config?.probabilities.spiralLearningChance || 0.6;
+
     // 1. Identify "Mastered" verbs in this level
     const masteredVerbs = Object.keys(verbHistory).filter(v => {
         const dbEntry = VERB_DATABASE.find(db => db.infinitive.toLowerCase() === v.toLowerCase());
@@ -569,7 +582,7 @@ export const generateLesson = async (
 
     // If progress > 40% AND we have mastered verbs, chance to deepen knowledge (Passato Prossimo)
     // This ensures we only test Past tense on verbs the user ALREADY knows in Present.
-    if (progress > 40 && masteredVerbs.length > 0 && Math.random() > 0.4) {
+    if (progress > triggerProgress && masteredVerbs.length > 0 && Math.random() < spiralChance) {
         const selectedInfinitive = masteredVerbs[Math.floor(Math.random() * masteredVerbs.length)];
         const dbEntry = VERB_DATABASE.find(db => db.infinitive.toLowerCase() === selectedInfinitive.toLowerCase());
         
@@ -584,7 +597,7 @@ export const generateLesson = async (
     }
 
     // 3. Select Verb (Forced or Random)
-    const verb = forcedVerb || getRandomVerb(level, recentVerbs);
+    const verb = forcedVerb || getRandomVerb(level, recentVerbs, config);
     
     // If we didn't force Past, ensure it's Present
     if (!forcedVerb) {

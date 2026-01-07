@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { UserBrain, BossExam } from '../types';
+import { UserBrain, BossExam, GlobalGameConfig } from '../types';
 import { generateBossExam } from '../services/geminiService';
 import { Swords, Timer, Heart, Trophy, ArrowRight, Check, X, Skull, Award, BrainCircuit, RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -8,6 +7,7 @@ interface BossFightSessionProps {
   onExit: () => void;
   brain: UserBrain;
   onUpdateBrain: (newBrain: UserBrain) => void;
+  config: GlobalGameConfig;
 }
 
 type GameState = 
@@ -17,7 +17,7 @@ type GameState =
   | 'INTRO_PHASE_3' | 'PHASE_3' 
   | 'VICTORY' | 'DEFEAT';
 
-const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUpdateBrain }) => {
+const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUpdateBrain, config }) => {
     const [gameState, setGameState] = useState<GameState>('LOADING');
     const [examData, setExamData] = useState<BossExam | null>(null);
     
@@ -44,7 +44,15 @@ const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUp
     useEffect(() => {
         const load = async () => {
             const knownVerbs = Object.keys(brain.verbHistory);
-            const data = await generateBossExam(knownVerbs, brain.currentLevel);
+            // Use config-defined fallback verbs if history is low
+            const fallbackVerbs = config.rules.bossFallbackVerbs.split(',').map(v => v.trim());
+            const verbsToUse = knownVerbs.length >= 5 ? knownVerbs : fallbackVerbs;
+            
+            // Note: We're calling generateBossExam with logic that defaults to a hardcoded list inside geminiService,
+            // but for full dynamic control, we could pass the list explicitly. 
+            // geminiService's generateBossExam logic already handles the "verbsToUse" internally based on the array passed.
+            const data = await generateBossExam(verbsToUse, brain.currentLevel);
+            
             if (data) {
                 setExamData(data);
                 setGameState('INTRO_PHASE_1');
@@ -160,9 +168,9 @@ const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUp
     const checkVictory = () => {
         // Total Questions: 10 (P1) + 10 (P2) + 5 (P3) = 25
         // Total Score: P1Score + P2Score + P3Score
-        // Required: 80% of 25 = 20
+        // Required: defined in config (default 20)
         const totalScore = p1Score + p2Score + p3Score;
-        if (totalScore >= 20) {
+        if (totalScore >= config.rules.bossPassScore) {
             setGameState('VICTORY');
         } else {
             setGameState('DEFEAT');
@@ -342,56 +350,45 @@ const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUp
                     </div>
                  )}
 
-                 <div className="w-full max-w-md mb-8 text-xs font-bold uppercase text-slate-500 text-center">
-                     Questão {p3Idx + 1}/5
+                 <div className="w-full max-w-md mb-8 text-xs font-bold uppercase text-slate-500">
+                     <span>Questão {p3Idx + 1}/5</span>
                  </div>
 
-                 <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 w-full max-w-md mb-6">
-                      <p className="text-slate-400 text-sm font-bold uppercase mb-2">Português</p>
-                      <p className="text-xl font-serif mb-6">{q.ptSentence}</p>
-                      
-                      <div className="h-px bg-slate-700 w-full mb-6"></div>
-
-                      <p className="text-slate-400 text-sm font-bold uppercase mb-2">Italiano</p>
-                      <input 
-                         autoFocus
-                         value={p3Input}
-                         onChange={e => setP3Input(e.target.value)}
-                         onKeyDown={e => e.key === 'Enter' && handleP3Submit()}
-                         className="w-full bg-slate-900 border border-slate-600 rounded-lg p-4 text-lg outline-none focus:border-purple-500"
-                         placeholder="Digite em italiano..."
-                      />
-                 </div>
-                 <button onClick={handleP3Submit} className="bg-purple-600 hover:bg-purple-500 text-white px-8 py-3 rounded-xl font-bold transition-colors">
-                     Confirmar
-                 </button>
+                 <div className="bg-slate-800 p-10 rounded-2xl border border-slate-700 text-center w-full max-w-md">
+                     <p className="text-xl font-serif leading-relaxed mb-6">"{q.ptSentence}"</p>
+                     
+                     <div className="text-xs font-bold text-purple-400 uppercase mb-2">Tradução em Italiano ({q.targetVerb})</div>
+                     <input 
+                       autoFocus
+                       value={p3Input}
+                       onChange={e => setP3Input(e.target.value)}
+                       onKeyDown={e => e.key === 'Enter' && handleP3Submit()}
+                       className="w-full bg-slate-900 border border-slate-600 rounded-lg p-4 text-center text-xl outline-none focus:border-purple-500 font-serif"
+                       placeholder="Scrivi qui..."
+                     />
+                </div>
             </div>
         );
     }
 
     if (gameState === 'VICTORY') {
         return (
-            <div className="h-full bg-slate-900 text-white flex flex-col items-center justify-center p-6 animate-pop-in">
-                <div className="relative mb-8">
-                    <div className="absolute inset-0 bg-yellow-500 blur-2xl opacity-20 rounded-full"></div>
-                    <Award size={96} className="text-yellow-400 relative z-10" />
-                </div>
-                <h1 className="text-4xl font-serif font-bold text-yellow-400 mb-2">IMPERATORE!</h1>
-                <p className="text-slate-300 text-lg mb-8 max-w-md text-center">
-                    Você conquistou a <strong>Corona di Alloro</strong>. <br/>
-                    Sua mente não traduz mais. Ela pensa.
+            <div className="h-full bg-slate-900 text-white flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                <Trophy size={80} className="text-yellow-400 mb-6" />
+                <h2 className="text-4xl font-bold font-serif mb-4 text-yellow-400">Vittoria!</h2>
+                <p className="text-lg text-slate-300 mb-8 max-w-md">
+                    O Guardião se curva diante de você.<br/>
+                    A Coroa de Louros é sua.
                 </p>
-                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 w-full max-w-sm mb-8">
-                    <div className="flex justify-between items-center mb-2">
-                        <span className="text-slate-400 text-sm">Precisão Total</span>
-                        <span className="text-emerald-400 font-bold text-xl">{Math.round(((p1Score + p2Score + p3Score) / 25) * 100)}%</span>
-                    </div>
-                    <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500" style={{ width: `${((p1Score + p2Score + p3Score) / 25) * 100}%` }}></div>
-                    </div>
+                <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-8 w-full max-w-xs">
+                     <div className="flex justify-between items-center mb-2">
+                         <span className="text-xs text-slate-400 uppercase font-bold">Score Total</span>
+                         <span className="text-xl font-bold text-emerald-400">{p1Score + p2Score + p3Score} pts</span>
+                     </div>
+                     <div className="text-xs text-slate-500">Mínimo necessário: {config.rules.bossPassScore}</div>
                 </div>
-                <button onClick={handleVictory} className="w-full max-w-sm bg-yellow-600 hover:bg-yellow-500 text-black py-4 rounded-xl font-bold text-xl shadow-lg transition-transform active:scale-95">
-                    RECEBER COROA
+                <button onClick={handleVictory} className="bg-yellow-500 hover:bg-yellow-400 text-black px-8 py-4 rounded-xl font-bold shadow-lg shadow-yellow-900/20 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
+                    <Award size={20} /> Reivindicar Coroa
                 </button>
             </div>
         );
@@ -399,18 +396,15 @@ const BossFightSession: React.FC<BossFightSessionProps> = ({ onExit, brain, onUp
 
     if (gameState === 'DEFEAT') {
         return (
-            <div className="h-full bg-slate-900 text-white flex flex-col items-center justify-center p-6">
-                <Skull size={80} className="text-slate-600 mb-6" />
-                <h1 className="text-4xl font-serif font-bold text-slate-500 mb-4">Sconfitta...</h1>
-                <p className="text-slate-400 mb-8 text-lg text-center max-w-md">
-                    O Guardião venceu desta vez. <br/>
-                    O Coliseu se fechará por 72 horas para sua recuperação.
+            <div className="h-full bg-slate-900 text-white flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                <Skull size={80} className="text-red-500 mb-6" />
+                <h2 className="text-4xl font-bold font-serif mb-4 text-red-500">Sconfitta...</h2>
+                <p className="text-lg text-slate-300 mb-8 max-w-md">
+                    O Guardião bloqueou sua passagem.<br/>
+                    Treine mais e tente novamente.
                 </p>
-                <div className="bg-slate-800 p-4 rounded-lg text-sm text-red-300 border border-red-900/50 mb-8">
-                    Dica: Seu problema não são os verbos, é o tempo de reação.
-                </div>
-                <button onClick={handleDefeat} className="w-full max-w-sm bg-slate-800 hover:bg-slate-700 text-white py-4 rounded-xl font-bold text-xl border border-slate-600">
-                    Aceitar Destino
+                <button onClick={handleDefeat} className="bg-slate-700 hover:bg-slate-600 text-white px-8 py-4 rounded-xl font-bold transition-all flex items-center gap-2">
+                    <ArrowRight size={20} /> Retornar
                 </button>
             </div>
         );

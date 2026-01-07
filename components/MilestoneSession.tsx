@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { UserBrain, MilestoneExam } from '../types';
+import { UserBrain, MilestoneExam, GlobalGameConfig } from '../types';
 import { generateMilestoneExam } from '../services/geminiService';
 import { Trophy, RefreshCw, Check, X, ArrowRight, Shield, Award, Clock } from 'lucide-react';
 
@@ -9,9 +8,10 @@ interface MilestoneSessionProps {
   brain: UserBrain;
   onUpdateBrain: (newBrain: UserBrain) => void;
   targetTier: number;
+  config: GlobalGameConfig;
 }
 
-const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUpdateBrain, targetTier }) => {
+const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUpdateBrain, targetTier, config }) => {
   const [loading, setLoading] = useState(true);
   const [exam, setExam] = useState<MilestoneExam | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -64,8 +64,8 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
     setCompleted(true);
     setScore(finalScore);
     
-    // Logic: Pass if >= 8 correct
-    const passed = finalScore >= 8;
+    // Logic: Pass if >= 8 correct (or based on config)
+    const passed = finalScore >= config.rules.milestonePassScore;
     const newBrain = { ...brain };
 
     if (passed) {
@@ -94,7 +94,7 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
   }
 
   if (completed) {
-    const passed = score >= 8;
+    const passed = score >= config.rules.milestonePassScore;
     return (
       <div className="h-full bg-slate-900 flex flex-col items-center justify-center text-white p-6 animate-fade-in text-center">
         <div className={`p-6 rounded-full mb-6 ${passed ? 'bg-yellow-500/20 text-yellow-500' : 'bg-red-500/20 text-red-500'}`}>
@@ -106,7 +106,7 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
           Você acertou <span className="font-bold text-white">{score}/10</span>.
           {passed 
             ? " A medalha foi adicionada à sua coleção." 
-            : " O Guardião exige 80% de precisão. O portão se fechará por 1 hora."}
+            : ` O Guardião exige ${config.rules.milestonePassScore}0% de precisão. O portão se fechará por 1 hora.`}
         </p>
 
         <button 

@@ -1,16 +1,16 @@
-
 import React, { useState } from 'react';
-import { UserBrain, StoreItem, StoreItemType, LevelStats } from '../types';
+import { UserBrain, StoreItem, StoreItemType, LevelStats, GlobalGameConfig } from '../types';
 import { ShoppingBag, Star, Layout, Zap, Award, Image, ArrowLeft, Shirt, Coffee, Tag, Sparkles } from 'lucide-react';
 
 interface IlMercatoProps {
     onExit: () => void;
     brain: UserBrain;
     onUpdateBrain: (newBrain: UserBrain) => void;
-    catalog: StoreItem[]; 
+    catalog: StoreItem[];
+    config: GlobalGameConfig;
 }
 
-const IlMercato: React.FC<IlMercatoProps> = ({ onExit, brain, onUpdateBrain, catalog }) => {
+const IlMercato: React.FC<IlMercatoProps> = ({ onExit, brain, onUpdateBrain, catalog, config }) => {
     const [activeTab, setActiveTab] = useState<string>('THEME');
     const totalXP = (Object.values(brain.levelStats) as LevelStats[]).reduce((acc, curr) => acc + curr.score, 0);
 

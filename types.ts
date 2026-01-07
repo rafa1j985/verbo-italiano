@@ -209,3 +209,52 @@ export interface BossExam {
   phase2: Array<{ sentence: string; isCorrect: boolean; correction?: string; reason: string }>; // Precision
   phase3: Array<{ ptSentence: string; itSentence: string; targetVerb: string }>; // Translation
 }
+
+// --- GOD MODE CONFIGURATION ---
+export interface GlobalGameConfig {
+  economy: {
+    xpPresentation: number;
+    xpDrill: number;
+    xpPractice: number; // Per sentence
+    xpVoiceBonus: number;
+    xpPerfectRun: number;
+    xpGameFlashcard: number;
+    xpGameStandard: number;
+    xpMaxPerSession: number;
+  };
+  probabilities: {
+    // A1 is always 100%
+    levelA2: { a1: number; a2: number };
+    levelB1: { a1: number; a2: number; b1: number };
+    levelB2: { a1: number; a2: number; b1: number; b2: number };
+    levelC1: { a1: number; a2: number; b1: number; b2: number; c1: number };
+    spiralLearningChance: number; // 0.0 to 1.0 (e.g. 0.6)
+    spiralTriggerProgress: number; // % (e.g. 40)
+  };
+  rules: {
+    drillMaskA1: number; // 3
+    drillMaskA2: number; // 4
+    drillMaskB1: number; // 5
+    drillMaskHigh: number; // 6 (B2/C1)
+    
+    storyUnlockCount: number; // 5
+    bossUnlockXP: number; // 1000
+    bossCooldownHours: number; // 72
+    bossPassScore: number; // 20
+    
+    milestoneInterval: number; // 10 (Dynamic Tiering)
+    milestoneCooldownHours: number; // 1
+    milestonePassScore: number; // 8
+    
+    voiceThreshold: number; // 10
+    audioCacheLimit: number; // 50
+    bossFallbackVerbs: string; // Comma separated
+  };
+  games: {
+    weightMatch: number; // 20
+    weightBinary: number; // 20
+    weightIntruder: number; // 20
+    weightFlashcard: number; // 20
+    weightDictation: number; // 20
+  };
+}

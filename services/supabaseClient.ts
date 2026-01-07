@@ -1,37 +1,10 @@
 
-import { createClient } from '@supabase/supabase-js';
+// Este arquivo será usado na Fase 2 para conectar o banco de dados.
+// Por enquanto, ele garante que a estrutura de pastas esteja pronta.
 
-// No Vercel, configuraremos essas variáveis com os links que você me mandou
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
+// import { createClient } from '@supabase/supabase-js';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// const supabaseUrl = process.env.VITE_SUPABASE_URL;
+// const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
 
-export const saveUserProgress = async (email: string, brainData: any) => {
-  if (!supabaseUrl || !email) return;
-  
-  const { error } = await supabase
-    .from('user_progress')
-    .upsert({ 
-      email: email.toLowerCase().trim(), 
-      brain_data: brainData 
-    }, { onConflict: 'email' });
-  
-  if (error) console.error("Erro ao salvar no Supabase:", error.message);
-};
-
-export const loadUserProgress = async (email: string) => {
-  if (!supabaseUrl || !email) return null;
-  
-  const { data, error } = await supabase
-    .from('user_progress')
-    .select('brain_data')
-    .eq('email', email.toLowerCase().trim())
-    .single();
-  
-  if (error) {
-    console.warn("Nenhum progresso prévio encontrado para este email.");
-    return null;
-  }
-  return data?.brain_data;
-};
+// export const supabase = createClient(supabaseUrl, supabaseAnonKey);

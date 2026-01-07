@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { UserBrain } from '../types';
+import { UserBrain, GlobalGameConfig } from '../types';
 import { generateStory, playTextToSpeech, generateIllustration } from '../services/geminiService';
 import { BookOpen, Star, ArrowRight, RefreshCw, Volume2, ThumbsUp, Brain, Image as ImageIcon, Sparkles } from 'lucide-react';
 
@@ -8,9 +7,10 @@ interface StoryModeSessionProps {
   onExit: () => void;
   brain: UserBrain;
   onUpdateBrain: (newBrain: UserBrain) => void;
+  config: GlobalGameConfig;
 }
 
-const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUpdateBrain }) => {
+const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUpdateBrain, config }) => {
   const [loading, setLoading] = useState(true);
   const [story, setStory] = useState<{ title: string; storyText: string; translation: string } | null>(null);
   const [ratingInterest, setRatingInterest] = useState(5);
