@@ -716,8 +716,11 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
               }, 2500);
           }
       } else {
+          // STEP 2: CHECK MEANING (TRANSLATION)
           const cleanInput = input.toLowerCase();
           const targets = current.ptTranslation.toLowerCase().split(/[\/,]/).map(s => s.trim());
+          
+          // Fuzzy match logic:
           const isCorrect = targets.some(t => {
               if (cleanInput === t) return true;
               const tClean = t.replace(/\(.*\)/, '').trim();
@@ -725,6 +728,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
               if (cleanInput.length > 3 && cleanInput.includes(tClean)) return true;
               return false;
           });
+          
           setDictationFeedback(isCorrect ? 'CORRECT' : 'WRONG');
           if (!isCorrect) { setSessionErrors(prev => prev + 1); recordVerbError(current.verbInfinitive); }
           setTimeout(() => {
@@ -1336,7 +1340,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
 
                                <div className="mb-6">
                                    <div className="text-xs font-bold uppercase text-slate-400 mb-2">
-                                       {dictationStep === 'LISTEN' ? '1. Escute e escreva em Italiano' : '2. Traduza o significado do verbo'}
+                                       {dictationStep === 'LISTEN' ? '1. Escute e escreva em Italiano' : '2. Escreva o significado do verbo (Infinitivo)'}
                                    </div>
                                    
                                    {dictationStep === 'TRANSLATE' && (

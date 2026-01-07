@@ -5,8 +5,16 @@ import { VERB_DATABASE, VerbEntry } from "../data/verbs";
 import { generateLocalLesson } from "./localExerciseService";
 import { conjugateRegular, FULL_PASSATO_PROSSIMO_DB } from "../data/conjugationRules"; 
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// --- LAZY INITIALIZATION (Prevents White Screen on Startup) ---
+let aiInstance: GoogleGenAI | null = null;
+
+const getAi = (): GoogleGenAI => {
+    if (!aiInstance) {
+        // Only initialize when called. This protects against load-time environment issues.
+        aiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }
+    return aiInstance;
+};
 
 const modelName = "gemini-3-flash-preview"; 
 const ttsModelName = "gemini-2.5-flash-preview-tts";
@@ -91,7 +99,7 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 export const prefetchAudio = async (text: string) => {
     if (BASE64_CACHE[text]) return;
     try {
-        const response = await ai.models.generateContent({
+        const response = await getAi().models.generateContent({
             model: ttsModelName,
             contents: [{ parts: [{ text }] }],
             config: {
@@ -117,7 +125,7 @@ export const playTextToSpeech = async (text: string) => {
 
         // Fetch if not cached
         if (!base64Audio) {
-            const response = await ai.models.generateContent({
+            const response = await getAi().models.generateContent({
                 model: ttsModelName,
                 contents: [{ parts: [{ text }] }],
                 config: {
@@ -195,7 +203,6 @@ export const generateBatchLessons = async (level: string, count: number, progres
 };
 
 const generateLessonAI = async (verb: string, level: string, tense: string): Promise<VerbLessonSession> => {
-    // UPDATED PROMPT BASED ON USER REQUEST
     const prompt = `
     Act as a native Italian teacher.
     Create a lesson for the verb "${verb}" in "${tense}" (Level: ${level}).
@@ -234,10 +241,10 @@ const generateLessonAI = async (verb: string, level: string, tense: string): Pro
     }`;
 
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json", temperature: 0.8 } // Increased temp for creativity
+            config: { responseMimeType: "application/json", temperature: 0.8 } 
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("No text");
@@ -253,7 +260,7 @@ export const analyzeSubmission = async (context: string, verb: string, expected:
     }
     const prompt = `Context: ${context}. Verb: ${verb}. Correct: ${expected}. User: ${user}. Analyze error. JSON: { "isCorrect": boolean, "userAnswer": "${user}", "correctAnswer": "${expected}", "errorCategory": "CONJUGATION"|"SPELLING"|"TENSE"|"NONE", "explanation": "PT explanation" }`;
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
@@ -273,7 +280,7 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
     
     const prompt = `Generate Boss Fight Italian level ${level}. Known: ${verbsToUse.join(", ")}. JSON: { "id": "boss", "phase1": [{ "pronoun": "Io", "verb": "Essere", "tense": "Presente", "correct": "sono" }], "phase2": [{ "sentence": "...", "isCorrect": boolean, "reason": "...", "correction": "..." }], "phase3": [{ "ptSentence": "...", "itSentence": "...", "targetVerb": "..." }] }`;
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
@@ -283,10 +290,8 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
 };
 
 export const generateStory = async (targetVerbs: string[], level: string) => {
-    // 1. INJECT DEFAULTS IF EMPTY
     const verbsToUse = targetVerbs.length > 0 ? targetVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
 
-    // 2. DEFINE SCHEMA
     const storySchema: Schema = {
         type: Type.OBJECT,
         properties: {
@@ -297,22 +302,24 @@ export const generateStory = async (targetVerbs: string[], level: string) => {
         required: ["title", "storyText", "translation"]
     };
 
-    const prompt = `Write a creative, engaging Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
+    const prompt = `Act as a creative Italian novelist. Write a SHORT, engaging Italian story (Level ${level}) using these verbs: ${verbsToUse.join(", ")}.
     Requirements:
-    - Use all verbs in the list.
+    - Focus on a specific Italian cultural setting (e.g. A busy café in Napoli, A traffic jam in Rome).
+    - Use all verbs in the list naturally.
     - Wrap the target verbs in <b> tags within the Italian text (e.g., "Lui <b>mangia</b> la pizza").
     - Provide a Portuguese translation.
-    - Return strictly JSON.`;
+    - Return strictly JSON.
+    - KEEP IT CONCISE (Max 150 words) to ensure fast generation.`;
     
     try {
-        // UPGRADE TO PRO MODEL FOR COMPLEX TASKS
-        const result = await ai.models.generateContent({
-            model: "gemini-3-pro-preview", // Use Pro for stories
+        // Use flash model for speed
+        const result = await getAi().models.generateContent({
+            model: "gemini-3-flash-preview", 
             contents: [{ parts: [{ text: prompt }] }],
             config: { 
                 responseMimeType: "application/json",
                 responseSchema: storySchema,
-                temperature: 0.8 // Slightly higher creativity
+                temperature: 0.8 
             }
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -333,7 +340,7 @@ export const generateMilestoneExam = async (allVerbs: string[], tier: number): P
      const verbsToUse = allVerbs.length > 0 ? allVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
      const prompt = `Create Milestone Exam Tier ${tier}. Verbs: ${verbsToUse.slice(0, 15).join(", ")}. JSON: { "id": "ms", "tier": ${tier}, "questions": [{ "type": "TRANSLATE_PT_IT"|"CONJUGATE"|"GAP_FILL", "question": "...", "context": "...", "correctAnswer": "...", "verb": "..." }] }`;
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
@@ -345,7 +352,7 @@ export const generateMilestoneExam = async (allVerbs: string[], tier: number): P
 export const generateStoreItemIdea = async (category: string, priceRange: string) => {
     const prompt = `Store Item Idea. Category: ${category}. Price: ${priceRange}. JSON: { "name": "...", "description": "...", "emoji": "..." }`;
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
@@ -356,7 +363,7 @@ export const generateStoreItemIdea = async (category: string, priceRange: string
 
 export const generateEmoji = async (text: string) => {
     try {
-        const result = await ai.models.generateContent({
+        const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: `Single emoji for: ${text}` }] }]
         });
@@ -366,10 +373,9 @@ export const generateEmoji = async (text: string) => {
 
 export const generateIllustration = async (storyText: string): Promise<string | null> => {
     try {
-         // Clean tags before sending to image gen
          const cleanPrompt = storyText.replace(/<[^>]*>/g, '').substring(0, 400);
          
-         const response = await ai.models.generateImages({
+         const response = await getAi().models.generateImages({
             model: imageModelName,
             prompt: `Artistic illustration for story: ${cleanPrompt}`,
             config: { numberOfImages: 1, aspectRatio: "4:3", outputMimeType: "image/jpeg" }

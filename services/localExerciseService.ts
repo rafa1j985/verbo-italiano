@@ -49,9 +49,9 @@ const generateSentence = (verb: string, personIndex: number, conjugation: string
     }
 
     const sentenceWithSubject = template.replace("[SUBJECT]", subject);
-    // Split by [VERB] to find start and end
-    // Use regex to be safe about spacing
-    const parts = sentenceWithSubject.split(/\[VERB\]/);
+    
+    // CRITICAL FIX: Split by [VERBO] because sentenceTemplates.ts uses [VERBO], not [VERB]
+    const parts = sentenceWithSubject.split(/\[VERBO\]/);
     
     const start = parts.length > 0 ? parts[0] : `${subject} `;
     const end = parts.length > 1 ? parts[1] : "";

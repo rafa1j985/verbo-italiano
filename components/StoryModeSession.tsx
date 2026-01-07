@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { UserBrain, GlobalGameConfig } from '../types';
 import { generateStory, playTextToSpeech, generateIllustration } from '../services/geminiService';
-import { BookOpen, Star, ArrowRight, RefreshCw, Volume2, ThumbsUp, Brain, Image as ImageIcon, Sparkles, AlertTriangle } from 'lucide-react';
+import { BookOpen, Star, RefreshCw, Volume2, ThumbsUp, Image as ImageIcon, Sparkles, AlertTriangle, Feather, PenTool } from 'lucide-react';
 
 interface StoryModeSessionProps {
   onExit: () => void;
@@ -11,52 +10,84 @@ interface StoryModeSessionProps {
   config: GlobalGameConfig;
 }
 
+// THEATRICAL LOADING MESSAGES
+const WRITER_STEPS = [
+    "🇮🇹 Stiamo cercando l'ispirazione...",
+    "🍷 Sorseggiando un buon vino...",
+    "🍝 Scegliendo i personaggi a Roma...",
+    "✍️ Scrivendo il primo capitolo...",
+    "🎭 Aggiungendo un po' di dramma...",
+    "📖 Quasi pronto..."
+];
+
 const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUpdateBrain, config }) => {
+  // UI States
   const [loading, setLoading] = useState(true);
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  
+  // Content States
   const [story, setStory] = useState<{ title: string; storyText: string; translation: string } | null>(null);
+  const [targetVerbs, setTargetVerbs] = useState<string[]>([]);
+  
+  // Image Async States
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // Rating States
   const [ratingInterest, setRatingInterest] = useState(5);
   const [ratingComprehension, setRatingComprehension] = useState(5);
   const [submitted, setSubmitted] = useState(false);
-  const [targetVerbs, setTargetVerbs] = useState<string[]>([]);
-  
-  // Image Gen State (Auto)
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // --- THEATRICAL LOADING EFFECT ---
+  useEffect(() => {
+      let interval: ReturnType<typeof setInterval>;
+      if (loading) {
+          interval = setInterval(() => {
+              setLoadingStepIndex(prev => (prev + 1) % WRITER_STEPS.length);
+          }, 2500); // Change message every 2.5s
+      }
+      return () => clearInterval(interval);
+  }, [loading]);
 
   const loadStory = async () => {
     setLoading(true);
     setError(null);
+    setLoadingStepIndex(0);
+    setGeneratedImage(null); // Reset image
+
     try {
-        // Pick the last 5 verbs added to history
+        // 1. Select Verbs (Logic: Recent & Hardest)
         const allVerbs = Object.keys(brain.verbHistory);
-        // Sort by lastSeen descending
         const sortedVerbs = allVerbs.sort((a, b) => brain.verbHistory[b].lastSeen - brain.verbHistory[a].lastSeen);
         const recentVerbs = sortedVerbs.slice(0, 5);
-        
         setTargetVerbs(recentVerbs);
         
+        // 2. Generate Text (FAST) - Using Flash Model
+        // This should take ~2-4 seconds.
         const data = await generateStory(recentVerbs, brain.currentLevel);
+        
         if (data) {
             setStory(data);
-            setLoading(false);
-            // TRIGGER IMAGE GENERATION AUTOMATICALLY
-            generateImage(data.storyText);
+            setLoading(false); // UNBLOCK UI IMMEDIATELY
+            
+            // 3. Trigger Image Generation (BACKGROUND/ASYNC)
+            // This does NOT block the user from reading.
+            generateImageAsync(data.storyText);
         } else {
-            throw new Error("Falha na geração");
+            throw new Error("O escritor falhou ao criar a trama.");
         }
     } catch (err) {
-        setError("Não foi possível criar a história. A IA pode estar sobrecarregada ou os verbos são insuficientes.");
+        console.error(err);
+        setError("Não foi possível criar a história. A IA pode estar sobrecarregada.");
         setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadStory();
-  }, []);
-
-  const generateImage = async (text: string) => {
+  const generateImageAsync = async (text: string) => {
       setIsGeneratingImage(true);
+      // We don't await this in the main thread (it's called without await in loadStory)
+      // But inside this async function, we await the API.
       const imgBase64 = await generateIllustration(text);
       if (imgBase64) {
           setGeneratedImage(imgBase64);
@@ -64,15 +95,16 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       setIsGeneratingImage(false);
   };
 
+  useEffect(() => {
+    loadStory();
+  }, []);
+
   const handleSubmit = () => {
     if (!story) return;
 
     const newBrain = { ...brain };
-    
-    // Reset counter
     newBrain.verbsSinceLastStory = 0;
     
-    // Save to history (Including Image)
     if (!newBrain.storyHistory) newBrain.storyHistory = [];
     newBrain.storyHistory.push({
       id: `story-${Date.now()}`,
@@ -82,7 +114,7 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       targetVerbs: targetVerbs,
       ratingInterest,
       ratingComprehension,
-      imageUrl: generatedImage || undefined // Save automatically
+      imageUrl: generatedImage || undefined
     });
 
     onUpdateBrain(newBrain);
@@ -92,23 +124,46 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
 
   const handleAudio = () => {
     if (story) {
-      // Strip HTML tags for TTS
       const cleanText = story.storyText.replace(/<[^>]*>/g, '');
       playTextToSpeech(cleanText);
     }
   };
 
+  // --- RENDER: LOADING THEATER ---
   if (loading) {
     return (
-      <div className="h-full bg-slate-50 flex flex-col items-center justify-center space-y-4 p-6 text-center">
-        <RefreshCw className="animate-spin text-purple-600" size={48} />
-        <h2 className="text-xl font-bold text-slate-700">Criando sua História...</h2>
-        <p className="text-slate-500">Conectando {targetVerbs.length > 0 ? targetVerbs.join(", ") : "verbos"} em um contexto único.</p>
-        <p className="text-xs text-slate-400 mt-4">Isso pode levar alguns segundos.</p>
+      <div className="h-full bg-slate-900 flex flex-col items-center justify-center space-y-8 p-6 text-center relative overflow-hidden">
+        {/* Ambient Background */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-purple-900/40 to-slate-900"></div>
+        
+        <div className="relative z-10 flex flex-col items-center">
+            <div className="relative mb-8">
+                <div className="absolute inset-0 bg-purple-500 blur-xl opacity-20 animate-pulse"></div>
+                <Feather className="text-purple-400 animate-bounce" size={64} />
+            </div>
+            
+            <h2 className="text-2xl font-serif font-bold text-white mb-2 tracking-wide">
+                {WRITER_STEPS[loadingStepIndex]}
+            </h2>
+            
+            <div className="flex gap-2 mt-4 justify-center">
+                {WRITER_STEPS.map((_, i) => (
+                    <div 
+                        key={i} 
+                        className={`h-1.5 w-8 rounded-full transition-all duration-500 ${i === loadingStepIndex ? 'bg-purple-500 scale-110' : 'bg-slate-700'}`}
+                    />
+                ))}
+            </div>
+
+            <p className="text-slate-500 text-xs mt-8 font-mono uppercase tracking-widest">
+                IA Generativa em ação
+            </p>
+        </div>
       </div>
     );
   }
 
+  // --- RENDER: ERROR ---
   if (error) {
       return (
           <div className="h-full bg-slate-50 flex flex-col items-center justify-center space-y-4 p-6 text-center">
@@ -129,8 +184,7 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       );
   }
 
-  if (!story) return null;
-
+  // --- RENDER: SUCCESS (SAVED) ---
   if (submitted) {
      return (
         <div className="h-full bg-slate-50 flex flex-col items-center justify-center animate-fade-in">
@@ -143,8 +197,11 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
      );
   }
 
+  if (!story) return null;
+
+  // --- RENDER: STORY READER ---
   return (
-    <div className="max-w-2xl mx-auto h-full p-6 flex flex-col overflow-y-auto">
+    <div className="max-w-2xl mx-auto h-full p-6 flex flex-col overflow-y-auto animate-fade-in">
       <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
               <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
@@ -160,20 +217,31 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       {/* STORY CARD CONTAINER */}
       <div className="bg-white rounded-2xl shadow-xl border border-slate-100 mb-8 relative overflow-hidden flex flex-col">
           
-          {/* IMAGE HEADER (AUTO-GENERATED) */}
-          <div className="relative w-full h-64 bg-slate-100 flex items-center justify-center overflow-hidden group">
+          {/* IMAGE HEADER (ASYNC PLACEHOLDER) */}
+          <div className="relative w-full h-64 bg-slate-900 flex items-center justify-center overflow-hidden group">
               {generatedImage ? (
                   <>
-                    <img src={generatedImage} alt="Story Art" className="w-full h-full object-cover transition-transform duration-700 hover:scale-105" />
+                    <img src={generatedImage} alt="Story Art" className="w-full h-full object-cover transition-transform duration-700 hover:scale-105 animate-in fade-in duration-1000" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                     <div className="absolute bottom-4 left-4 text-white">
                         <span className="text-[10px] uppercase font-bold tracking-widest bg-purple-500/80 px-2 py-1 rounded backdrop-blur-md">Arte Originale</span>
                     </div>
                   </>
               ) : (
-                  <div className="flex flex-col items-center gap-3 text-slate-400">
-                      <RefreshCw className="animate-spin" size={32} />
-                      <span className="text-xs font-bold uppercase tracking-widest animate-pulse">Pintando Cena...</span>
+                  <div className="flex flex-col items-center gap-3 text-slate-400 p-8 text-center">
+                      {isGeneratingImage ? (
+                          <>
+                            <RefreshCw className="animate-spin text-purple-400" size={32} />
+                            <span className="text-xs font-bold uppercase tracking-widest animate-pulse text-purple-300">
+                                O artista está pintando a cena...
+                            </span>
+                            <p className="text-[10px] text-slate-500 max-w-xs mt-2">
+                                A história já está pronta abaixo. A imagem aparecerá magicamente quando secar a tinta.
+                            </p>
+                          </>
+                      ) : (
+                          <ImageIcon size={32} />
+                      )}
                   </div>
               )}
           </div>
@@ -181,7 +249,7 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
           <div className="p-8">
               <h2 className="text-3xl font-serif font-bold text-slate-800 mb-6">{story.title}</h2>
               
-              <div className="prose prose-lg text-slate-700 leading-relaxed mb-8">
+              <div className="prose prose-lg text-slate-700 leading-relaxed mb-8 font-serif">
                   <p dangerouslySetInnerHTML={{ __html: story.storyText }}></p>
               </div>
 
@@ -189,7 +257,11 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
                   <button onClick={handleAudio} className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-600 font-bold transition-colors">
                       <Volume2 size={20} /> Ouvir
                   </button>
-                  <div className="text-xs text-slate-400 font-medium">Baseado em fatos gramaticais</div>
+                  <div className="flex gap-2">
+                      {targetVerbs.map(v => (
+                          <span key={v} className="text-[10px] uppercase font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded">{v}</span>
+                      ))}
+                  </div>
               </div>
               
               <div className="mt-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm text-slate-500 italic">
