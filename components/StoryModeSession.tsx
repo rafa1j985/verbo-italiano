@@ -65,8 +65,8 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
         setTargetVerbs(recentVerbs);
         
         // 2. THEATRICAL DELAY (The Parachute)
-        // Force at least 4 seconds of "Acting" so the user feels the experience
-        const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+        // Force 12 seconds of "Acting" as requested
+        const minWait = new Promise(resolve => setTimeout(resolve, 12000));
         
         // 3. Generate Content (Parallel)
         const contentPromise = generateStory(recentVerbs, brain.currentLevel);
@@ -202,7 +202,15 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
      );
   }
 
-  if (!story) return null;
+  // PROTECTION: Prevent White Screen if story is somehow null after loading
+  if (!story) {
+      return (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+              <p>Carregando conteúdo...</p>
+              <button onClick={onExit} className="mt-4 text-sm underline">Cancelar</button>
+          </div>
+      );
+  }
 
   // --- RENDER: STORY READER ---
   return (

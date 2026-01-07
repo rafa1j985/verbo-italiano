@@ -18,7 +18,8 @@ const getAi = (): GoogleGenAI => {
 
 const modelName = "gemini-3-flash-preview"; 
 const ttsModelName = "gemini-2.5-flash-preview-tts";
-const imageModelName = "imagen-3.0-generate-001"; 
+// Use gemini-2.5-flash-image for generation via generateContent
+const imageModelName = "gemini-2.5-flash-image"; 
 
 // --- HELPER: CLEAN JSON (BULLETPROOF) ---
 const cleanJSON = (text: string): string => {
@@ -377,12 +378,24 @@ export const generateIllustration = async (storyText: string): Promise<string | 
     try {
          const cleanPrompt = storyText.replace(/<[^>]*>/g, '').substring(0, 400);
          
-         const response = await getAi().models.generateImages({
-            model: imageModelName,
-            prompt: `Artistic illustration for story: ${cleanPrompt}`,
-            config: { numberOfImages: 1, aspectRatio: "4:3", outputMimeType: "image/jpeg" }
+         // Use gemini-2.5-flash-image which supports generateContent and is more available than Imagen
+         const response = await getAi().models.generateContent({
+            model: "gemini-2.5-flash-image",
+            contents: [{ 
+                parts: [{ text: `Create an artistic illustration for this story scene (Italian style, warm colors): ${cleanPrompt}` }] 
+            }],
+            config: { 
+                // responseMimeType is not supported for image generation models in generateContent
+            }
         });
-        return response.generatedImages?.[0]?.image?.imageBytes ? `data:image/jpeg;base64,${response.generatedImages[0].image.imageBytes}` : null;
+
+        // Find the image part in the response
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            }
+        }
+        return null;
     } catch (e) { 
         console.error("Image Generation Failed", e);
         return null; 
