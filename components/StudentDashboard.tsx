@@ -85,9 +85,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ userName, onStartTr
   const activeTitleObj = brain.activeTitle ? catalog.find(i => i.id === brain.activeTitle) : null;
 
   // TROPHY ROOM LOGIC
-  // Filter inventory for visual items (Flags, Collectibles, Clothing, Custom)
+  // Filter inventory for visual items (Flags, Collectibles, Clothing, MEDALS)
   const collectionItems = (brain.inventory || []).map(id => catalog.find(i => i.id === id)).filter(item => 
-      item && (item.type === 'FLAG' || item.type === 'COLLECTIBLE' || item.type === 'CLOTHING' || (!['THEME', 'TITLE', 'POWERUP', 'SPECIAL'].includes(item.type)))
+      item && (item.type === 'FLAG' || item.type === 'COLLECTIBLE' || item.type === 'CLOTHING' || item.type === 'MEDAL' || (!['THEME', 'TITLE', 'POWERUP', 'SPECIAL'].includes(item.type)))
   ) as StoreItem[];
 
   // Boss Countdown timer
