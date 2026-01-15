@@ -605,12 +605,16 @@ CREATE TRIGGER on_auth_user_created
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {realUsers.map((user) => {
+                                    // SAFETY CHECK: brain might be null or empty object if ghost user
                                     const brain = user.brain || {};
+                                    
                                     // Count unique verbs found
                                     const verbsCount = brain.verbHistory ? Object.keys(brain.verbHistory).length : 0;
+                                    
                                     // Count total exercises done (across all levels)
+                                    // SAFETY: Ensure levelStats exists before accessing values
                                     const totalExercises = brain.levelStats 
-                                        ? Object.values(brain.levelStats).reduce((acc: any, curr: any) => acc + curr.exercisesCount, 0)
+                                        ? Object.values(brain.levelStats).reduce((acc: any, curr: any) => acc + (curr.exercisesCount || 0), 0)
                                         : 0;
 
                                     return (

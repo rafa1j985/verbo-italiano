@@ -189,6 +189,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   // Loading & Cultural Quote State
   const [loading, setLoading] = useState(true);
   const [quote, setQuote] = useState(CULTURAL_QUOTES[0]);
+  const [loadingProgress, setLoadingProgress] = useState(0); // 0 to 100
   
   // Session Metrics
   const [sessionErrors, setSessionErrors] = useState(0);
@@ -379,9 +380,33 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       } catch (e) { console.error(e); }
   };
 
+  // --- WAIT & ENTERTAINMENT LOGIC ---
+  const waitForThinking = async (duration: number) => {
+      return new Promise<void>(resolve => {
+          const startTime = Date.now();
+          setLoadingProgress(0);
+          
+          // Cycle quotes every 5 seconds (duration / 3)
+          const quoteInterval = setInterval(() => {
+              setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
+          }, duration / 3);
+
+          const progressInterval = setInterval(() => {
+              const elapsed = Date.now() - startTime;
+              const pct = Math.min((elapsed / duration) * 100, 100);
+              setLoadingProgress(pct);
+              if (elapsed >= duration) {
+                  clearInterval(progressInterval);
+                  clearInterval(quoteInterval);
+                  resolve();
+              }
+          }, 100);
+      });
+  };
+
   const initializeSession = async () => {
       setLoading(true);
-      // Pick a random cultural quote for this loading instance
+      // Pick initial random quote
       setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
       
       const progress = getProgress();
@@ -390,9 +415,8 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       const recentVerbs = Object.keys(brain.verbHistory)
           .filter(v => (Date.now() - brain.verbHistory[v].lastSeen) < 24 * 60 * 60 * 1000); 
           
-      // CREATE A MINIMUM DELAY PROMISE (e.g., 6 seconds) to let user read the quote
-      // This forces the "Waiting Room" experience
-      const minWaitTime = new Promise(resolve => setTimeout(resolve, 6000));
+      // MANDATORY 15 SECONDS WAIT FOR AI TO THINK
+      const minWaitTime = waitForThinking(15000);
       
       // GENERATE CONTENT
       const contentPromise = generateLesson(brain.currentLevel, progress, recentVerbs, brain.verbHistory, config);
@@ -526,8 +550,8 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       setLoading(true);
       setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
       
-      // MINIMUM DELAY FOR QUOTE READING (4 seconds for subsequent lessons)
-      const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+      // MANDATORY 15 SECONDS WAIT (Even between lessons, per request)
+      const minWait = waitForThinking(15000);
       
       let nextData: VerbLessonSession;
       let fetchPromise: Promise<void>;
@@ -623,6 +647,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       setSubmitting(false);
   };
 
+  // ... (Game setup functions - unchanged) ...
   const setupMatchGame = (data: VerbLessonSession) => {
       const pronouns = ['Io', 'Tu', 'Lui/Lei', 'Noi', 'Voi', 'Loro'];
       const cards: MatchCard[] = [];
@@ -706,12 +731,12 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
           const conj = conjugations[idx];
           const fullPhrase = `${pronounLabel} ${conj}`;
           
-          // Cost tracking handled in handlePlayAudio when button clicked
           return { verbInfinitive: data.verb, pronoun: pronounLabel, conjugation: conj, fullItalian: fullPhrase, ptTranslation: data.lesson.definition };
       });
       setDictationQueue(robustQueue); setDictationIndex(0); setDictationStep('LISTEN'); setDictationInput(''); setDictationFeedback(null);
   };
 
+  // ... (Game interaction handlers - unchanged) ...
   const handleFlashcardSubmit = () => {
       const current = flashcardQueue[flashcardIndex];
       const input = flashcardInput.trim().toLowerCase();
@@ -809,12 +834,15 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
               {/* Background Ambient Effect */}
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800 to-slate-900 opacity-50"></div>
               
-              <div className="relative z-10 flex flex-col items-center max-w-lg">
-                  <div className="mb-8">
-                      <RefreshCw className="animate-spin text-emerald-500" size={48} />
+              <div className="relative z-10 flex flex-col items-center max-w-lg w-full">
+                  <div className="mb-8 relative">
+                      <RefreshCw className="animate-spin-slow text-emerald-500" size={48} />
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xs font-bold text-white">
+                          {Math.round(loadingProgress)}%
+                      </div>
                   </div>
                   
-                  <div className="mb-8 space-y-4">
+                  <div className="mb-8 space-y-4 min-h-[160px] flex flex-col justify-center animate-fade-in key-{quote.it}">
                       <Quote className="text-slate-600 mx-auto transform -scale-x-100" size={32} />
                       <h3 className="text-2xl font-serif font-bold text-white leading-relaxed italic">
                           "{quote.it}"
@@ -827,9 +855,14 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
                       </p>
                   </div>
 
-                  <div className="flex items-center gap-2 text-slate-500 text-xs mt-8 animate-pulse">
+                  {/* Progress Bar */}
+                  <div className="w-full max-w-xs h-1 bg-slate-800 rounded-full overflow-hidden mb-4">
+                      <div className="h-full bg-emerald-500 transition-all duration-300" style={{width: `${loadingProgress}%`}}></div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-slate-500 text-xs animate-pulse">
                       <Brain className="text-emerald-600" size={14} />
-                      <span>Contextualizando exercício para você...</span>
+                      <span>O Oráculo está forjando frases contextualizadas...</span>
                   </div>
               </div>
           </div>
@@ -968,7 +1001,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
               </div>
           )}
 
-          {/* STAGE 2: DRILL */}
+          {/* STAGE 2: DRILL (Unchanged from original logic, just context) */}
           {stage === 'DRILL' && (
                <div className="flex-1 flex flex-col animate-fade-in">
                   <div className="text-center mb-6">
@@ -1162,7 +1195,7 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
               </div>
           )}
 
-          {/* STAGE 4: NEURAL GAME */}
+          {/* STAGE 4: NEURAL GAME (Unchanged) */}
           {stage === 'CONNECTION' && (
               <div className="flex-1 flex flex-col animate-fade-in">
                    <div className="text-center mb-6">

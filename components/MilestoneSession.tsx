@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { UserBrain, MilestoneExam, GlobalGameConfig } from '../types';
 import { generateMilestoneExam } from '../services/geminiService';
-import { Trophy, RefreshCw, Check, X, ArrowRight, Shield, Award, Clock } from 'lucide-react';
+import { CULTURAL_QUOTES } from '../data/sentenceTemplates';
+import { Trophy, RefreshCw, Check, X, ArrowRight, Shield, Award, Clock, Sparkles, Quote, Brain } from 'lucide-react';
 
 interface MilestoneSessionProps {
   onExit: () => void;
@@ -14,27 +16,62 @@ interface MilestoneSessionProps {
 const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUpdateBrain, targetTier, config }) => {
   const [loading, setLoading] = useState(true);
   const [exam, setExam] = useState<MilestoneExam | null>(null);
+  
+  // Loading State Aesthetics (15s Wait)
+  const [quote, setQuote] = useState(CULTURAL_QUOTES[0]);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [input, setInput] = useState('');
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState<'CORRECT' | 'WRONG' | null>(null);
   const [completed, setCompleted] = useState(false);
 
+  // --- WAIT & ENTERTAINMENT LOGIC ---
+  const waitForThinking = async (duration: number) => {
+      return new Promise<void>(resolve => {
+          const startTime = Date.now();
+          setLoadingProgress(0);
+          
+          // Cycle quotes every 5 seconds
+          const quoteInterval = setInterval(() => {
+              setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
+          }, duration / 3);
+
+          const progressInterval = setInterval(() => {
+              const elapsed = Date.now() - startTime;
+              const pct = Math.min((elapsed / duration) * 100, 100);
+              setLoadingProgress(pct);
+              if (elapsed >= duration) {
+                  clearInterval(progressInterval);
+                  clearInterval(quoteInterval);
+                  resolve();
+              }
+          }, 100);
+      });
+  };
+
   useEffect(() => {
-    const init = async () => {
-      // Get all verbs from history
-      const allVerbs = Object.keys(brain.verbHistory);
-      const data = await generateMilestoneExam(allVerbs, targetTier);
-      
-      if (data) {
+    const initSession = async () => {
+        setLoading(true);
+        // Pick initial random quote
+        setQuote(CULTURAL_QUOTES[Math.floor(Math.random() * CULTURAL_QUOTES.length)]);
+
+        // 1. Mandatory 15s Wait
+        const minWait = waitForThinking(15000);
+
+        // 2. Generate Exam
+        const allVerbs = Object.keys(brain.verbHistory);
+        const generationPromise = generateMilestoneExam(allVerbs, targetTier);
+
+        // 3. Wait for both
+        const [_, data] = await Promise.all([minWait, generationPromise]);
+        
         setExam(data);
-      } else {
-        alert("O oráculo não pôde gerar o teste agora. Tente novamente.");
-        onExit();
-      }
-      setLoading(false);
+        setLoading(false);
     };
-    init();
+
+    initSession();
   }, []);
 
   const handleSubmit = () => {
@@ -85,10 +122,46 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
 
   if (loading) {
     return (
-      <div className="h-full bg-slate-900 flex flex-col items-center justify-center text-white p-6 text-center">
-        <RefreshCw className="animate-spin text-yellow-500 mb-6" size={48} />
-        <h2 className="text-2xl font-serif font-bold text-yellow-500">Invocando a Pietra Miliare...</h2>
-        <p className="text-slate-400 mt-2">Preparando o desafio do marco {targetTier}.</p>
+      <div className="h-full bg-slate-900 flex flex-col items-center justify-center p-8 text-center animate-fade-in relative overflow-hidden">
+          {/* Background Ambient Effect */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-amber-900/40 via-slate-950 to-black animate-pulse"></div>
+          
+          <div className="relative z-10 flex flex-col items-center max-w-lg w-full">
+              <div className="mb-8 relative">
+                  <div className="absolute inset-0 bg-amber-500 blur-2xl opacity-20 animate-pulse"></div>
+                  <Sparkles className="animate-spin-slow text-amber-400" size={64} />
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xs font-bold text-white">
+                      {Math.round(loadingProgress)}%
+                  </div>
+              </div>
+              
+              <h2 className="text-2xl font-serif font-bold text-amber-100 mb-6 tracking-wide">
+                  Forjando a Pietra Miliare...
+              </h2>
+
+              <div className="mb-8 space-y-4 min-h-[140px] flex flex-col justify-center animate-fade-in key-{quote.it}">
+                  <Quote className="text-slate-600 mx-auto transform -scale-x-100" size={24} />
+                  <h3 className="text-xl font-serif font-bold text-white leading-relaxed italic">
+                      "{quote.it}"
+                  </h3>
+                  <p className="text-amber-400 font-medium text-sm">
+                      {quote.pt}
+                  </p>
+                  <p className="text-slate-500 text-[10px] uppercase tracking-widest mt-2">
+                      — {quote.author}
+                  </p>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full max-w-xs h-1 bg-slate-800 rounded-full overflow-hidden mb-4">
+                  <div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${loadingProgress}%`}}></div>
+              </div>
+
+              <div className="flex items-center gap-2 text-slate-500 text-xs animate-pulse">
+                  <Brain className="text-amber-600" size={14} />
+                  <span>Selecionando seus verbos mais desafiadores...</span>
+              </div>
+          </div>
       </div>
     );
   }

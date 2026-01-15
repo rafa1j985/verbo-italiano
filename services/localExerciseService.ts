@@ -1,7 +1,7 @@
 
-import { Exercise, ExerciseType, VerbLevel, VerbLessonSession } from "../types";
-import { VerbEntry } from "../data/verbs";
-import { IRREGULAR_PRESENTE, FULL_PASSATO_PROSSIMO_DB, conjugateRegular } from "../data/conjugationRules";
+import { Exercise, ExerciseType, VerbLevel, VerbLessonSession, MilestoneExam, MilestoneQuestion } from "../types";
+import { VerbEntry, VERB_DATABASE } from "../data/verbs";
+import { IRREGULAR_PRESENTE, FULL_PASSATO_PROSSIMO_DB, conjugateRegular, PRONOUNS } from "../data/conjugationRules";
 import { RICH_GENERIC_TEMPLATES, VERB_SPECIFIC_TEMPLATES } from "../data/sentenceTemplates";
 
 const normalizeVerb = (v: string) => {
@@ -20,16 +20,10 @@ const SUBJECTS_BY_PERSON: Record<number, string[]> = {
 
 // Realistic contexts for fallback scenarios to replace "Complete a frase"
 const FALLBACK_CONTEXTS = [
-    "Vida Cotidiana",
-    "Expressando uma Opinião",
-    "No Trabalho",
-    "Descrevendo uma Ação",
-    "Em Casa",
-    "Durante uma Viagem",
-    "Conversa entre Amigos",
-    "Situação Hipotética",
-    "Rotina Diária",
-    "Expressando Dúvida"
+    "Conversazione Semplice",
+    "Vita Quotidiana",
+    "Domanda e Risposta",
+    "Descrizione"
 ];
 
 // Generate a random sentence for a specific verb and specific person index
@@ -38,29 +32,34 @@ const generateSentence = (verb: string, personIndex: number, conjugation: string
     const subject = subjects[Math.floor(Math.random() * subjects.length)];
     const answer = conjugation[personIndex];
 
-    let template = "";
-    const specificTemplates = VERB_SPECIFIC_TEMPLATES[verb];
+    // SIMPLE GENERIC TEMPLATE (Safe for all verbs)
+    // Avoids "Non capisco perché Mario non [mangia] la domenica" which makes no sense for many verbs.
+    // Instead uses: "Adesso [SUBJECT] [VERB]..." or "[SUBJECT] [VERB] sempre..."
     
-    // Improved Logic: Use Specific if available, else use Rich Generic
+    const SAFE_TEMPLATES = [
+        "[SUBJECT] [VERBO] adesso.",
+        "Oggi [SUBJECT] [VERBO] qui.",
+        "[SUBJECT] [VERBO] sempre.",
+        "Perché [SUBJECT] [VERBO]?",
+        "Di solito [SUBJECT] [VERBO] bene."
+    ];
+
+    let template = SAFE_TEMPLATES[Math.floor(Math.random() * SAFE_TEMPLATES.length)];
+    
+    // Check if specific templates exist
+    const specificTemplates = VERB_SPECIFIC_TEMPLATES[verb];
     if (specificTemplates && specificTemplates.length > 0) {
         template = specificTemplates[Math.floor(Math.random() * specificTemplates.length)];
-    } else {
-        template = RICH_GENERIC_TEMPLATES[Math.floor(Math.random() * RICH_GENERIC_TEMPLATES.length)];
     }
 
     const sentenceWithSubject = template.replace("[SUBJECT]", subject);
-    
-    // CRITICAL FIX: Split by [VERBO] because sentenceTemplates.ts uses [VERBO], not [VERB]
     const parts = sentenceWithSubject.split(/\[VERBO\]/);
     
     const start = parts.length > 0 ? parts[0] : `${subject} `;
     const end = parts.length > 1 ? parts[1] : "";
 
-    // Select a random context to make the fallback feel more alive
-    const randomContext = FALLBACK_CONTEXTS[Math.floor(Math.random() * FALLBACK_CONTEXTS.length)];
-
     return {
-        context: randomContext,
+        context: "Esercizio Base",
         sentenceStart: start,
         sentenceEnd: end,
         correctAnswer: answer
@@ -115,4 +114,72 @@ export const generateLocalLesson = (verb: VerbEntry, tense: string = "Presente I
 
 export const generateLocalExercise = (verb: VerbEntry): Exercise | null => {
    return null; 
+};
+
+// --- NEW: MILESTONE FALLBACK GENERATOR ---
+export const generateLocalMilestoneExam = (tier: number, userVerbs: string[]): MilestoneExam => {
+    const questions: MilestoneQuestion[] = [];
+    
+    // 1. Select Verbs to test (Prioritize user verbs, fill with DB)
+    let candidates = VERB_DATABASE.filter(v => userVerbs.includes(v.infinitive));
+    if (candidates.length < 10) {
+        // If not enough history, take randoms from DB
+        const others = VERB_DATABASE.filter(v => !userVerbs.includes(v.infinitive));
+        candidates = [...candidates, ...others.slice(0, 10 - candidates.length)];
+    }
+    
+    // Shuffle candidates
+    candidates = candidates.sort(() => Math.random() - 0.5).slice(0, 10);
+
+    // 2. Create Questions
+    candidates.forEach((verbEntry, idx) => {
+        const clean = normalizeVerb(verbEntry.infinitive);
+        const randType = Math.random();
+        
+        let q: MilestoneQuestion;
+
+        if (randType < 0.33) {
+            // TYPE: TRANSLATE (PT -> IT)
+            q = {
+                type: 'TRANSLATE_PT_IT',
+                question: `Como se diz "${verbEntry.translation}" em Italiano?`,
+                context: "Tradução Direta",
+                correctAnswer: verbEntry.infinitive,
+                verb: verbEntry.infinitive
+            };
+        } else {
+            // TYPE: CONJUGATE
+            let conjugation = IRREGULAR_PRESENTE[clean] || conjugateRegular(clean, verbEntry.tags);
+            
+            if (!conjugation) {
+                // Safe fallback if conjugation fails
+                q = {
+                    type: 'TRANSLATE_PT_IT',
+                    question: `O verbo "${verbEntry.infinitive}" significa:`,
+                    context: "Significado",
+                    correctAnswer: verbEntry.translation,
+                    verb: verbEntry.infinitive
+                };
+            } else {
+                const pIdx = Math.floor(Math.random() * 6);
+                const pronoun = PRONOUNS[pIdx];
+                const answer = conjugation[pIdx];
+                
+                q = {
+                    type: 'CONJUGATE',
+                    question: `Conjugue: ${pronoun} ______ (${verbEntry.infinitive})`,
+                    context: "Presente Indicativo",
+                    correctAnswer: answer,
+                    verb: verbEntry.infinitive
+                };
+            }
+        }
+        questions.push(q);
+    });
+
+    return {
+        id: `local-milestone-${Date.now()}`,
+        tier: tier,
+        questions: questions
+    };
 };
