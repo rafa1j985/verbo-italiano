@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 interface ErrorBoundaryProps {
-  children?: ReactNode;
+  children: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -13,17 +13,10 @@ interface ErrorBoundaryState {
 
 // Error Boundary to catch crashes and prevent white screen
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: ''
-  };
-
-  // Explicitly defining props property for TS compliance in some configs
-  public props: ErrorBoundaryProps;
+  public state: ErrorBoundaryState = { hasError: false, error: '' };
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.props = props;
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {

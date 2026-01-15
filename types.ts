@@ -98,61 +98,15 @@ export interface BossStats {
   hasMedal: boolean; // Corona di Alloro
 }
 
-// --- NOVEL / STORY MODE TYPES ---
-export type CharacterGender = 'MALE' | 'FEMALE';
-export type CharacterArchetype = 'DETECTIVE' | 'CHEF' | 'STUDENT';
-
-export interface StoryChapter {
-  chapterNumber: number;
-  title: string;
-  emoji: string; // Chapter Icon
-  textIt: string; // Legacy field (Full Text)
-  textPt: string;
-  summary: string; 
-  userChoice?: string; 
-  targetVerbs: string[];
-  date: number;
-  // NEW: 3-Act Structure
-  acts?: {
-      act1: { textIt: string; textPt: string };
-      act2: { 
-          textPreGap: string; 
-          correctVerb: string; 
-          distractors: string[]; 
-          textPostGap: string; 
-          textPt: string 
-      };
-      act3: { textIt: string; textPt: string };
-  };
-}
-
-export interface NovelProgress {
-  gender: CharacterGender;
-  archetype: CharacterArchetype;
-  currentChapter: number;
-  plotSummary: string; // Accumulated context of the whole book
-  chapters: StoryChapter[];
-}
-
-// --- DETECTIVE MODE TYPES ---
-export interface DetectiveCase {
+export interface StoryEntry {
   id: string;
-  title: string; // "Il Caso del Gelato Scomparso"
-  suspectStatement: string; // Italian text with grammar nuance
-  question: string; // "Why is he lying?"
-  difficulty: string;
-  options: Array<{
-    text: string;
-    isCorrect: boolean;
-    explanation: string;
-  }>;
-  rewardClue: string; // "Impronta Digitale", "Lupa", etc.
-}
-
-export interface DetectiveStats {
-  casesSolved: number;
-  lastCaseDate: number; // Timestamp of last played case
-  cluesFound: string[]; // List of collected clue names
+  date: number;
+  storyTitle: string;
+  storyText: string;
+  targetVerbs: string[];
+  ratingInterest: number; // 0-10
+  ratingComprehension: number; // 0-10
+  imageUrl?: string; // Base64 of generated image
 }
 
 // --- MILESTONE TYPES ---
@@ -177,7 +131,8 @@ export interface MilestoneExam {
 }
 
 // --- STORE TYPES ---
-export type StoreItemType = 'THEME' | 'POWERUP' | 'FLAG' | 'COLLECTIBLE' | 'TITLE' | 'CLOTHING' | 'SPECIAL' | string;
+// Expanded to allow dynamic string types for Admin custom categories
+export type StoreItemType = 'THEME' | 'POWERUP' | 'FLAG' | 'COLLECTIBLE' | 'TITLE' | 'CLOTHING' | string;
 
 export interface StoreItem {
   id: string;
@@ -205,12 +160,6 @@ export interface Notification {
     read: boolean;
 }
 
-export interface UsageStats {
-    textQueries: number;
-    audioPlays: number;
-    imageGenerations: number;
-}
-
 export interface UserBrain {
   currentLevel: VerbLevel;
   levelStats: Record<VerbLevel, LevelStats>;
@@ -220,15 +169,9 @@ export interface UserBrain {
   safetyNetActive: number; 
   introducedTopics: string[];
   bossStats?: BossStats; 
-  
-  // Story Mode -> Now Novel Mode
   verbsSinceLastStory: number; 
-  novelData?: NovelProgress; // NEW: Replaces storyHistory array
-  storyHistory?: any[]; // Deprecated, kept for backward compat if needed
+  storyHistory: StoryEntry[]; 
   
-  // Detective Mode
-  detectiveStats?: DetectiveStats;
-
   // Milestone Tracking
   milestoneHistory: MilestoneEntry[];
   lastMilestoneFail: number; // Timestamp for cooldown
@@ -241,9 +184,6 @@ export interface UserBrain {
   
   // Notifications
   notifications: Notification[];
-
-  // Cost Tracking
-  usageStats: UsageStats;
 }
 
 export interface UserStats {
