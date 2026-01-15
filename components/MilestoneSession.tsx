@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { UserBrain, MilestoneExam, GlobalGameConfig } from '../types';
 import { generateMilestoneExam } from '../services/geminiService';
 import { CULTURAL_QUOTES } from '../data/sentenceTemplates';
-import { Trophy, RefreshCw, Check, X, ArrowRight, Shield, Award, Clock, Sparkles, Quote, Brain } from 'lucide-react';
+import { Trophy, Check, X, ArrowRight, Shield, Award, Sparkles, Quote, Brain, AlertTriangle } from 'lucide-react';
 
 interface MilestoneSessionProps {
   onExit: () => void;
@@ -67,7 +67,14 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
         // 3. Wait for both
         const [_, data] = await Promise.all([minWait, generationPromise]);
         
-        setExam(data);
+        if (data && data.questions && data.questions.length > 0) {
+            setExam(data);
+        } else {
+            console.error("Milestone Generation returned empty data.");
+            // Force fallback if even the generator returned empty (Should be handled in service, but double check)
+            // If this happens, we might need to alert the user or retry.
+        }
+        
         setLoading(false);
     };
 
@@ -194,7 +201,19 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
     );
   }
 
-  const currentQ = exam?.questions[currentIndex];
+  // Fallback if exam is somehow null after loading
+  if (!exam) {
+      return (
+          <div className="h-full bg-slate-900 flex flex-col items-center justify-center text-white p-6 text-center">
+              <AlertTriangle className="text-red-500 mb-4" size={48} />
+              <h2 className="text-2xl font-bold mb-2">Erro Estrutural</h2>
+              <p className="text-slate-400 mb-6">A estrutura da prova não pôde ser gerada. Tente novamente.</p>
+              <button onClick={onExit} className="bg-slate-700 px-6 py-2 rounded-lg">Voltar</button>
+          </div>
+      );
+  }
+
+  const currentQ = exam.questions[currentIndex];
 
   return (
     <div className="h-full bg-slate-900 text-white flex flex-col">
@@ -238,7 +257,7 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
                     {currentQ?.type === 'GAP_FILL' && 'Complete a Lacuna'}
                  </span>
                  <h3 className="text-3xl md:text-4xl font-serif font-bold leading-tight">
-                    {currentQ?.question}
+                    {currentQ?.question || "Carregando pergunta..."}
                  </h3>
                  {currentQ?.context && (
                     <p className="text-slate-400 mt-4 italic">"{currentQ.context}"</p>

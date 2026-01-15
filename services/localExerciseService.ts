@@ -18,35 +18,27 @@ const SUBJECTS_BY_PERSON: Record<number, string[]> = {
   5: ["Loro", "I ragazzi", "Le ragazze", "I miei amici"] 
 };
 
-// Realistic contexts for fallback scenarios to replace "Complete a frase"
-const FALLBACK_CONTEXTS = [
-    "Conversazione Semplice",
-    "Vita Quotidiana",
-    "Domanda e Risposta",
-    "Descrizione"
-];
-
 // Generate a random sentence for a specific verb and specific person index
 const generateSentence = (verb: string, personIndex: number, conjugation: string[]): {context: string, sentenceStart: string, sentenceEnd: string, correctAnswer: string} => {
     const subjects = SUBJECTS_BY_PERSON[personIndex];
     const subject = subjects[Math.floor(Math.random() * subjects.length)];
     const answer = conjugation[personIndex];
 
-    // SIMPLE GENERIC TEMPLATE (Safe for all verbs)
-    // Avoids "Non capisco perché Mario non [mangia] la domenica" which makes no sense for many verbs.
-    // Instead uses: "Adesso [SUBJECT] [VERB]..." or "[SUBJECT] [VERB] sempre..."
+    // SEMANTICALLY SAFE TEMPLATES
+    // Removed "bene", "sempre", "adesso" generic usages that cause logic errors with verbs like "Odiare" or "Morire".
+    // Using modal-like structures or emphatic positions which fit 99% of verbs.
     
     const SAFE_TEMPLATES = [
-        "[SUBJECT] [VERBO] adesso.",
-        "Oggi [SUBJECT] [VERBO] qui.",
-        "[SUBJECT] [VERBO] sempre.",
-        "Perché [SUBJECT] [VERBO]?",
-        "Di solito [SUBJECT] [VERBO] bene."
+        "In questo momento [SUBJECT] [VERBO].", // Right now... (Works for almost all actions)
+        "Perché [SUBJECT] [VERBO] così?", // Why ... like that? (Works for Odiate, Mangiate, Dormite)
+        "Forse [SUBJECT] non [VERBO].", // Perhaps ... not ...
+        "Di sicuro [SUBJECT] [VERBO].", // For sure ...
+        "[SUBJECT] [VERBO] davvero." // ... really ...
     ];
 
     let template = SAFE_TEMPLATES[Math.floor(Math.random() * SAFE_TEMPLATES.length)];
     
-    // Check if specific templates exist
+    // Check if specific templates exist (High Priority)
     const specificTemplates = VERB_SPECIFIC_TEMPLATES[verb];
     if (specificTemplates && specificTemplates.length > 0) {
         template = specificTemplates[Math.floor(Math.random() * specificTemplates.length)];
@@ -59,7 +51,7 @@ const generateSentence = (verb: string, personIndex: number, conjugation: string
     const end = parts.length > 1 ? parts[1] : "";
 
     return {
-        context: "Esercizio Base",
+        context: "Esercizio Pratico",
         sentenceStart: start,
         sentenceEnd: end,
         correctAnswer: answer
@@ -106,7 +98,7 @@ export const generateLocalLesson = (verb: VerbEntry, tense: string = "Presente I
             secondaryTranslations: [], 
             verbType: typeDesc,
             fullConjugation: conjugation,
-            usageTip: "Use este verbo em contextos do dia a dia." // Fallback Tip
+            usageTip: "Verbo essenziale nella lingua italiana." // Safer Fallback Tip
         },
         practiceSentences: [s1, s2]
     };
@@ -138,12 +130,12 @@ export const generateLocalMilestoneExam = (tier: number, userVerbs: string[]): M
         
         let q: MilestoneQuestion;
 
-        if (randType < 0.33) {
+        if (randType < 0.4) {
             // TYPE: TRANSLATE (PT -> IT)
             q = {
                 type: 'TRANSLATE_PT_IT',
                 question: `Como se diz "${verbEntry.translation}" em Italiano?`,
-                context: "Tradução Direta",
+                context: "Vocabolario",
                 correctAnswer: verbEntry.infinitive,
                 verb: verbEntry.infinitive
             };
@@ -155,8 +147,8 @@ export const generateLocalMilestoneExam = (tier: number, userVerbs: string[]): M
                 // Safe fallback if conjugation fails
                 q = {
                     type: 'TRANSLATE_PT_IT',
-                    question: `O verbo "${verbEntry.infinitive}" significa:`,
-                    context: "Significado",
+                    question: `Qual o significado de "${verbEntry.infinitive}"?`,
+                    context: "Significato",
                     correctAnswer: verbEntry.translation,
                     verb: verbEntry.infinitive
                 };
@@ -167,8 +159,8 @@ export const generateLocalMilestoneExam = (tier: number, userVerbs: string[]): M
                 
                 q = {
                     type: 'CONJUGATE',
-                    question: `Conjugue: ${pronoun} ______ (${verbEntry.infinitive})`,
-                    context: "Presente Indicativo",
+                    question: `Conjugue: ${pronoun} ______`,
+                    context: `Verbo: ${verbEntry.infinitive}`,
                     correctAnswer: answer,
                     verb: verbEntry.infinitive
                 };

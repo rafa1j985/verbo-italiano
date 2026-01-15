@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { generateStoreItemIdea, generateEmoji } from '../services/geminiService';
 import { getAllUsersAdmin } from '../services/supabaseService';
+import { supabase } from '../services/supabaseClient';
 import { Exercise, StoreItem, Notification, GlobalGameConfig, UsageStats } from '../types';
 import { VERB_DATABASE } from '../data/verbs'; 
-import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book, Clock, Terminal, Copy, Check, UserPlus, DollarSign, Activity, Image } from 'lucide-react';
+import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book, Clock, Terminal, Copy, Check, UserPlus, DollarSign, Activity, Image, Zap } from 'lucide-react';
 
 interface AdminDashboardProps {
     storeCatalog?: StoreItem[];
@@ -75,6 +76,46 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
       setItemForm({ name: '', description: '', price: '1000', type: 'COLLECTIBLE', asset: '', categoryInput: '' });
       setEditingId(null);
       setShowEditor(false);
+  };
+
+  // --- REPAIR FUNCTION ---
+  const handleSyncMissingProgress = async () => {
+      if (!confirm("Isso irá criar dados vazios para usuários que possuem perfil mas não possuem progresso (Caso ViniJr). Continuar?")) return;
+      
+      setUsersLoading(true);
+      try {
+          // 1. Get all profiles
+          const { data: profiles } = await supabase.from('profiles').select('id');
+          if (!profiles) throw new Error("No profiles found");
+
+          // 2. Get all progress
+          const { data: progress } = await supabase.from('user_progress').select('id');
+          const progressIds = new Set(progress?.map(p => p.id) || []);
+
+          // 3. Find missing
+          const missing = profiles.filter(p => !progressIds.has(p.id));
+
+          if (missing.length === 0) {
+              alert("Todos os usuários verificados já possuem dados sincronizados.");
+          } else {
+              // 4. Insert default for missing
+              const updates = missing.map(p => ({
+                  id: p.id,
+                  brain_data: {}, // Empty brain
+                  updated_at: new Date().toISOString()
+              }));
+
+              const { error } = await supabase.from('user_progress').insert(updates);
+              if (error) throw error;
+              
+              alert(`Sucesso! ${missing.length} usuários foram reparados.`);
+              fetchUsers(); // Refresh list
+          }
+      } catch (e: any) {
+          alert("Erro ao sincronizar: " + e.message);
+      } finally {
+          setUsersLoading(false);
+      }
   };
 
   // --- STORE HANDLERS ---
@@ -476,14 +517,27 @@ WHERE id NOT IN (SELECT id FROM public.user_progress);`
                         </div>
                     </div>
                     
-                    <div className="relative bg-slate-900 rounded-lg p-4 font-mono text-sm text-slate-300 overflow-x-auto">
-                         <button 
-                            onClick={handleCopySyncSQL}
-                            className="absolute top-4 right-4 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-2 font-bold"
+                    <div className="flex gap-2 mb-4">
+                        <button 
+                            onClick={handleSyncMissingProgress}
+                            disabled={usersLoading}
+                            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/20"
                         >
-                            {copiedSync ? <Check size={14}/> : <Copy size={14}/>}
-                            {copiedSync ? "Copiado!" : "Copiar Script"}
+                            <Zap size={18} /> {usersLoading ? "Processando..." : "Executar Correção (Aplicação)"}
                         </button>
+                    </div>
+
+                    <div className="relative bg-slate-900 rounded-lg p-4 font-mono text-sm text-slate-300 overflow-x-auto">
+                         <div className="absolute top-4 right-4 flex items-center gap-2">
+                             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Fallback SQL</span>
+                             <button 
+                                onClick={handleCopySyncSQL}
+                                className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-xs flex items-center gap-2 font-bold"
+                            >
+                                {copiedSync ? <Check size={14}/> : <Copy size={14}/>}
+                                {copiedSync ? "Copiado!" : "Copiar"}
+                            </button>
+                         </div>
 <pre className="whitespace-pre-wrap leading-relaxed">{`-- SINCRONIZAR USUÁRIOS FANTASMAS (Auth -> Profiles)
 -- Executar caso existam usuários registrados que não aparecem na lista.
 

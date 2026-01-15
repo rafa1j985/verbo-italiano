@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type, Modality, Schema } from "@google/genai";
 import { Exercise, Feedback, ErrorCategory, VerbLessonSession, ExerciseType, BossExam, MilestoneExam, VerbState, StoreItem, GlobalGameConfig, CharacterGender, CharacterArchetype, DetectiveCase } from "../types";
 import { VERB_DATABASE, VerbEntry } from "../data/verbs";
-import { generateLocalLesson } from "./localExerciseService";
+import { generateLocalLesson, generateLocalMilestoneExam } from "./localExerciseService";
 import { conjugateRegular, FULL_PASSATO_PROSSIMO_DB } from "../data/conjugationRules"; 
 
 // --- LAZY INITIALIZATION ---
@@ -125,7 +125,7 @@ export const playTextToSpeech = async (text: string) => {
     }
 };
 
-// ... (Standard Lesson Generators remain the same) ...
+// ... (Standard Lesson Generators) ...
 export const generateLesson = async (level: string, progress: number, recentVerbs: string[], history: Record<string, VerbState>, config: GlobalGameConfig): Promise<VerbLessonSession> => {
     const verb = getRandomVerb(level, recentVerbs, config);
     const spiralChance = config.probabilities.spiralLearningChance || 0.6;
@@ -143,8 +143,7 @@ export const generateLesson = async (level: string, progress: number, recentVerb
         }
     }
     
-    // PRIORITY: AI (With new 15s wait, we can trust it more)
-    // Only use local fallback if AI throws error
+    // PRIORITY: AI
     try {
         return await generateLessonAI(targetVerb.infinitive, level, targetTense);
     } catch(e) {
@@ -165,19 +164,23 @@ export const generateBatchLessons = async (level: string, count: number, progres
 const generateLessonAI = async (verb: string, level: string, tense: string): Promise<VerbLessonSession> => {
     // REINFORCED PROMPT FOR SEMANTIC LOGIC
     const prompt = `
-    Role: Native Italian Teacher.
+    Role: Expert Italian Teacher.
     Task: Create a structured lesson for the verb "${verb}" in "${tense}" (Level: ${level}).
+    
+    CRITICAL RULES FOR SEMANTICS:
+    1. Sentences MUST make logical sense in the real world.
+    2. DO NOT use generic templates like "I eat well" for verbs like "Hate" or "Die".
+    3. If verb is "Odiare" (Hate), context must be negative (e.g., "Oidio il traffico").
+    4. If verb is "Amare" (Love), context must be positive.
+    5. If verb is "Morire" (Die), do not say "I die usually". Say "I'm dying of laughter" or "Plants die without water".
     
     Requirements:
     1. Definition: Concise Portuguese translation.
     2. Conjugation: Strict 6 ordered forms (Io, Tu, Lui/Lei, Noi, Voi, Loro).
     3. Practice Sentences: 
-       - MUST be semantically logical for the verb "${verb}".
-       - Do NOT use random contexts. If the verb is "Mangiare", context must be food/restaurant.
-       - If verb is "Imparare", context must be school/study.
        - Sentence format: Start + [VERB_CONJUGATED] + End.
        - Example Correct: "Mario [mangia] la pizza."
-       - Example Wrong: "Mario [impara] la domenica." (Nonsense).
+       - Example WRONG: "Mario [odia] bene." (NONSENSE).
     
     Return strict JSON:
     {
@@ -194,7 +197,7 @@ const generateLessonAI = async (verb: string, level: string, tense: string): Pro
       },
       "practiceSentences": [
         {
-          "context": "Short Context Label (e.g. Al Ristorante)",
+          "context": "Specific Context (e.g. Al Ristorante)",
           "sentenceStart": "Part before verb",
           "sentenceEnd": "Part after verb",
           "correctAnswer": "Conjugated Verb"
@@ -212,7 +215,7 @@ const generateLessonAI = async (verb: string, level: string, tense: string): Pro
         const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json", temperature: 0.7 } 
+            config: { responseMimeType: "application/json", temperature: 0.5 } // Lower temp for logic
         });
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("No text");
@@ -406,18 +409,52 @@ export const generateStory = async (targetVerbs: string[], level: string) => {
 export const generateMilestoneExam = async (allVerbs: string[], tier: number): Promise<MilestoneExam | null> => {
      const verbsToUse = allVerbs.length > 0 ? allVerbs : ["Essere", "Avere", "Andare", "Fare", "Mangiare"];
      
-     // 1. Always Try AI. No fallback.
-     const prompt = `Create Milestone Exam Tier ${tier}. Verbs: ${verbsToUse.slice(0, 15).join(", ")}. JSON: { "id": "ms", "tier": ${tier}, "questions": [{ "type": "TRANSLATE_PT_IT"|"CONJUGATE"|"GAP_FILL", "question": "...", "context": "...", "correctAnswer": "...", "verb": "..." }] }`;
+     // 1. Try AI First with stronger Prompt
+     const prompt = `
+     Create a Milestone Exam for Italian Level Tier ${tier}. 
+     Verbs to test: ${verbsToUse.slice(0, 15).join(", ")}.
+     
+     Rules:
+     1. Questions must be non-empty strings.
+     2. Context must be clear.
+     3. "question" field: The prompt the user sees (e.g., "Conjugate 'Essere' for 'Io'").
+     4. "verb": The infinitive of the verb being tested.
+     
+     Return strict JSON: 
+     { 
+       "id": "ms_${Date.now()}", 
+       "tier": ${tier}, 
+       "questions": [
+         { 
+           "type": "TRANSLATE_PT_IT", 
+           "question": "Como se diz 'Eu sou' em Italiano?", 
+           "context": "Verbo Essere", 
+           "correctAnswer": "Io sono", 
+           "verb": "Essere" 
+         },
+         {
+           "type": "CONJUGATE",
+           "question": "Conjugue: Noi ______ (Andare) al cinema.",
+           "context": "Presente",
+           "correctAnswer": "andiamo",
+           "verb": "Andare"
+         }
+       ] 
+     }`;
+
     try {
         const result = await getAi().models.generateContent({
             model: modelName,
             contents: [{ parts: [{ text: prompt }] }],
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(cleanJSON(result.candidates?.[0]?.content?.parts?.[0]?.text || "null"));
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Empty AI response");
+        return JSON.parse(cleanJSON(text));
     } catch (e) {
-        console.error("Gemini Milestone Failed:", e);
-        return null;
+        console.error("Gemini Milestone Failed, switching to LOCAL:", e);
+        // FORCE LOCAL GENERATION IF AI FAILS
+        return generateLocalMilestoneExam(tier, allVerbs);
     }
 };
 
