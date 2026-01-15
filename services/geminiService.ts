@@ -204,7 +204,7 @@ export const generateBossExam = async (knownVerbs: string[], level: string): Pro
     } catch (e) { return null; }
 };
 
-// --- NEW NOVEL STORY MODE GENERATOR ---
+// --- NEW NOVEL STORY MODE GENERATOR (3-ACT STRUCTURE) ---
 export const generateStoryChapter = async (
     gender: CharacterGender, 
     archetype: CharacterArchetype, 
@@ -222,30 +222,38 @@ export const generateStoryChapter = async (
     if (archetype === 'STUDENT') contextStr = "Context: Student life in Milan. Fashion, aperitivo, exams.";
     
     const prompt = `
-    You are writing Chapter ${chapterNum} of an interactive Italian novel.
+    Write Chapter ${chapterNum} of an interactive Italian novel in 3 DISTINCT ACTS.
     Protagonist: ${gender === 'MALE' ? 'Male' : 'Female'}.
     Role: ${archetype}.
     ${contextStr}
-    Language Level: ${level} (Adjust vocabulary accordingly).
-    Target Verbs to use (Bold them in HTML): ${verbsToUse.join(", ")}.
+    Language Level: ${level}.
+    Target Verbs: ${verbsToUse.join(", ")}.
     
-    Previous Story Context: "${previousSummary}"
+    Previous Context: "${previousSummary}"
     
-    Task:
-    1. Write a short chapter (100-120 words) continuing the story.
-    2. End with a minor cliffhanger or decision point.
-    3. Provide 2 or 3 distinct options for what the protagonist does next (in Italian, 1st person).
-    4. Choose a single relevant Emoji that represents this chapter.
+    Structure the response in 3 Acts:
+    Act 1: Setting the scene (approx 80-100 words).
+    Act 2: The Conflict & Challenge. Write about 50 words, then STOP at a crucial verb. This will be an interactive gap for the user. Provide the verb that fits the gap and 2 wrong distractors (wrong conjugation or tense). Then provide the rest of the paragraph (approx 50 words).
+    Act 3: Resolution & Cliffhanger (approx 80-100 words).
     
     Return strict JSON:
     {
-      "title": "Creative Italian Title",
+      "title": "Italian Title",
       "emoji": "🍕",
-      "textIt": "Italian text with <b>verbs</b>...",
-      "textPt": "Portuguese translation...",
-      "summary": "One sentence summary of what happened (for memory).",
+      "summary": "One sentence summary.",
+      "acts": {
+        "act1": { "textIt": "Italian text...", "textPt": "Portuguese translation..." },
+        "act2": { 
+            "textPreGap": "Italian text before the gap...", 
+            "correctVerb": "ha visto", 
+            "distractors": ["vedeva", "vede"], 
+            "textPostGap": "... Italian text after gap.", 
+            "textPt": "Portuguese translation of the FULL Act 2." 
+        },
+        "act3": { "textIt": "Italian text...", "textPt": "Portuguese translation..." }
+      },
       "options": [
-        { "text": "Choice 1 in Italian (e.g. Apro la porta)", "action": "Short desc of choice for AI memory" },
+        { "text": "Choice 1 in Italian", "action": "Short desc" },
         { "text": "Choice 2 in Italian", "action": "Short desc" }
       ]
     }
@@ -265,16 +273,18 @@ export const generateStoryChapter = async (
         return JSON.parse(cleanJSON(text));
     } catch (e) { 
         console.error("Story Generation Failed:", e);
-        // Fallback for demo continuity
+        // Fallback for demo
         return {
-            title: "Il Mistero Continua",
-            emoji: "❓",
-            textIt: `Non so cosa fare. <b>Penso</b> che la situazione sia complicata. <b>Vedo</b> una luce in fondo alla strada.`,
-            textPt: "Não sei o que fazer. Penso que a situação é complicada. Vejo uma luz no fim da rua.",
-            summary: "O protagonista ficou indeciso.",
+            title: "Errore di Connessione",
+            emoji: "⚠️",
+            summary: "Error generating story.",
+            acts: {
+                act1: { textIt: "Non riesco a scrivere ora.", textPt: "Não consigo escrever agora." },
+                act2: { textPreGap: "Devo", correctVerb: "riprovare", distractors: ["riprovo", "riproverò"], textPostGap: "più tardi.", textPt: "Devo tentar novamente mais tarde." },
+                act3: { textIt: "Spero che funzioni.", textPt: "Espero que funcione." }
+            },
             options: [
-                { text: "Vado verso la luce", action: "Go to light" },
-                { text: "Torno indietro", action: "Go back" }
+                { text: "Riprova", action: "Retry" }
             ]
         };
     }

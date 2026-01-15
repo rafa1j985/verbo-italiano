@@ -70,6 +70,10 @@ const DetectiveSession: React.FC<DetectiveSessionProps> = ({ onExit, brain, onUp
         // Always update date to limit frequency
         newBrain.detectiveStats.lastCaseDate = Date.now();
 
+        // UPDATE COSTS (1 Text Generation per case)
+        if (!newBrain.usageStats) newBrain.usageStats = { textQueries: 0, audioPlays: 0, imageGenerations: 0 };
+        newBrain.usageStats.textQueries += 1;
+
         if (isCorrect) {
             newBrain.detectiveStats.casesSolved += 1;
             if (!newBrain.detectiveStats.cluesFound.includes(caseData.rewardClue)) {

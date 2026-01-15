@@ -1,11 +1,10 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { generateStoreItemIdea, generateEmoji } from '../services/geminiService';
 import { getAllUsersAdmin } from '../services/supabaseService';
-import { Exercise, StoreItem, Notification, GlobalGameConfig } from '../types';
+import { Exercise, StoreItem, Notification, GlobalGameConfig, UsageStats } from '../types';
 import { VERB_DATABASE } from '../data/verbs'; 
-import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book, Clock, Terminal, Copy, Check, UserPlus } from 'lucide-react';
+import { Users, Database, PlusCircle, RefreshCw, BarChart2, Shield, ShoppingBag, Sparkles, Trash2, Edit2, ToggleLeft, ToggleRight, Tag, Save, X, Bell, Settings, Percent, Coins, Gamepad2, Lock, Search, Filter, Book, Clock, Terminal, Copy, Check, UserPlus, DollarSign, Activity, Image } from 'lucide-react';
 
 interface AdminDashboardProps {
     storeCatalog?: StoreItem[];
@@ -16,7 +15,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUpdateCatalog, onBroadcastNotification, config, onUpdateConfig }) => {
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CONTENT' | 'USERS' | 'STORE' | 'GOD_MODE' | 'DATABASE'>('CONTENT');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CONTENT' | 'USERS' | 'STORE' | 'GOD_MODE' | 'DATABASE' | 'COSTS'>('CONTENT');
   
   // Real Users State
   const [realUsers, setRealUsers] = useState<any[]>([]);
@@ -47,15 +46,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ storeCatalog = [], onUp
   const [copied, setCopied] = useState(false);
   const [copiedSync, setCopiedSync] = useState(false);
 
+  // COST ESTIMATES (USD)
+  const COST_PER_TEXT = 0.0005; // Gemini Flash aprox
+  const COST_PER_AUDIO = 0.001; // TTS aprox
+  const COST_PER_IMAGE = 0.040; // Imagen aprox
+
   useEffect(() => {
       if (config && !localConfig) {
           setLocalConfig(config);
       }
   }, [config]);
 
-  // Load Users when tab changes to USERS
+  // Load Users when tab changes to USERS or COSTS
   useEffect(() => {
-      if (activeTab === 'USERS') {
+      if (activeTab === 'USERS' || activeTab === 'COSTS') {
           fetchUsers();
       }
   }, [activeTab]);
@@ -318,6 +322,30 @@ WHERE id NOT IN (SELECT id FROM public.user_progress);`
 
   const getVerbCountByLevel = (level: string) => VERB_DATABASE.filter(v => v.level === level).length;
 
+  // COST CALCULATIONS
+  const calculateCosts = (usage: UsageStats = { textQueries: 0, audioPlays: 0, imageGenerations: 0 }) => {
+      const textCost = (usage.textQueries || 0) * COST_PER_TEXT;
+      const audioCost = (usage.audioPlays || 0) * COST_PER_AUDIO;
+      const imageCost = (usage.imageGenerations || 0) * COST_PER_IMAGE;
+      const total = textCost + audioCost + imageCost;
+      return { textCost, audioCost, imageCost, total };
+  };
+
+  const calculateTotalPlatformCost = () => {
+      let totalText = 0;
+      let totalAudio = 0;
+      let totalImage = 0;
+      
+      realUsers.forEach(u => {
+          const stats = u.brain?.usageStats || { textQueries: 0, audioPlays: 0, imageGenerations: 0 };
+          totalText += (stats.textQueries || 0) * COST_PER_TEXT;
+          totalAudio += (stats.audioPlays || 0) * COST_PER_AUDIO;
+          totalImage += (stats.imageGenerations || 0) * COST_PER_IMAGE;
+      });
+
+      return { totalText, totalAudio, totalImage, grandTotal: totalText + totalAudio + totalImage };
+  };
+
   return (
     <div className="flex h-[calc(100vh-64px)] bg-slate-100">
       {/* Sidebar */}
@@ -328,6 +356,7 @@ WHERE id NOT IN (SELECT id FROM public.user_progress);`
             </h2>
             <nav className="space-y-2">
                 <button onClick={() => setActiveTab('OVERVIEW')} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'OVERVIEW' ? 'bg-emerald-900 text-emerald-400 font-medium' : 'hover:bg-slate-800'}`}><BarChart2 size={18} /> Visão Global</button>
+                <button onClick={() => setActiveTab('COSTS')} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'COSTS' ? 'bg-amber-900 text-amber-400 font-medium' : 'hover:bg-slate-800'}`}><DollarSign size={18} /> Custos & API</button>
                 <button onClick={() => setActiveTab('STORE')} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'STORE' ? 'bg-emerald-900 text-emerald-400 font-medium' : 'hover:bg-slate-800'}`}><ShoppingBag size={18} /> Gestão de Loja</button>
                 <button onClick={() => setActiveTab('GOD_MODE')} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'GOD_MODE' ? 'bg-emerald-900 text-emerald-400 font-medium' : 'hover:bg-slate-800'}`}><Settings size={18} /> Regras do Sistema</button>
                 <button onClick={() => setActiveTab('USERS')} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'USERS' ? 'bg-emerald-900 text-emerald-400 font-medium' : 'hover:bg-slate-800'}`}><Users size={18} /> Alunos</button>
@@ -340,6 +369,93 @@ WHERE id NOT IN (SELECT id FROM public.user_progress);`
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
         
+        {/* --- TAB: COSTS (NEW) --- */}
+        {activeTab === 'COSTS' && (
+            <div className="space-y-6 animate-fade-in">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800">Controle Financeiro de API</h1>
+                        <p className="text-slate-500">Estimativa de custos por uso de Texto, Áudio e Imagem.</p>
+                    </div>
+                    <button onClick={fetchUsers} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1 rounded">
+                        <RefreshCw size={14} className={usersLoading ? 'animate-spin' : ''}/> Atualizar
+                    </button>
+                </div>
+
+                {/* Summary Cards */}
+                <div className="grid grid-cols-4 gap-4">
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Custo Total (Global)</span>
+                        <span className="text-3xl font-mono font-bold text-slate-800">${calculateTotalPlatformCost().grandTotal.toFixed(4)}</span>
+                        <div className="w-full bg-slate-100 h-1 mt-4 rounded-full overflow-hidden">
+                            <div className="bg-emerald-500 h-full" style={{width: '100%'}}></div>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Texto (LLM)</span>
+                        <span className="text-2xl font-mono font-bold text-blue-600">${calculateTotalPlatformCost().totalText.toFixed(4)}</span>
+                        <span className="text-xs text-slate-400 mt-1">~${COST_PER_TEXT} / req</span>
+                    </div>
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Áudio (TTS)</span>
+                        <span className="text-2xl font-mono font-bold text-purple-600">${calculateTotalPlatformCost().totalAudio.toFixed(4)}</span>
+                        <span className="text-xs text-slate-400 mt-1">~${COST_PER_AUDIO} / play</span>
+                    </div>
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Imagem (GenAI)</span>
+                        <span className="text-2xl font-mono font-bold text-pink-600">${calculateTotalPlatformCost().totalImage.toFixed(4)}</span>
+                        <span className="text-xs text-slate-400 mt-1">~${COST_PER_IMAGE} / img</span>
+                    </div>
+                </div>
+
+                {/* Detailed Table */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-xs border-b border-slate-200">
+                            <tr>
+                                <th className="py-4 px-6">Usuário</th>
+                                <th className="py-4 px-6 text-center">Texto (Reqs)</th>
+                                <th className="py-4 px-6 text-center">Áudio (Plays)</th>
+                                <th className="py-4 px-6 text-center">Imagem (Gens)</th>
+                                <th className="py-4 px-6 text-right">Custo Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {realUsers.map((user) => {
+                                const stats = user.brain?.usageStats || { textQueries: 0, audioPlays: 0, imageGenerations: 0 };
+                                const costs = calculateCosts(stats);
+                                return (
+                                    <tr key={user.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="py-4 px-6">
+                                            <div className="font-bold text-slate-800">{user.full_name || 'Sem nome'}</div>
+                                            <div className="text-xs text-slate-500">{user.email}</div>
+                                        </td>
+                                        <td className="py-4 px-6 text-center">
+                                            <div className="font-mono font-bold text-slate-700">{stats.textQueries || 0}</div>
+                                            <div className="text-[10px] text-blue-500">${costs.textCost.toFixed(4)}</div>
+                                        </td>
+                                        <td className="py-4 px-6 text-center">
+                                            <div className="font-mono font-bold text-slate-700">{stats.audioPlays || 0}</div>
+                                            <div className="text-[10px] text-purple-500">${costs.audioCost.toFixed(4)}</div>
+                                        </td>
+                                        <td className="py-4 px-6 text-center">
+                                            <div className="font-mono font-bold text-slate-700">{stats.imageGenerations || 0}</div>
+                                            <div className="text-[10px] text-pink-500">${costs.imageCost.toFixed(4)}</div>
+                                        </td>
+                                        <td className="py-4 px-6 text-right">
+                                            <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+                                                ${costs.total.toFixed(4)}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        )}
+
         {/* --- TAB: DATABASE (SQL) --- */}
         {activeTab === 'DATABASE' && (
             <div className="space-y-6 animate-fade-in max-w-3xl">
@@ -459,7 +575,7 @@ CREATE TRIGGER on_auth_user_created
             </div>
         )}
 
-        {/* ... (Keep existing Tabs: USERS, CONTENT, GOD_MODE, STORE, OVERVIEW) ... */}
+        {/* --- TAB: USERS (UPDATED WITH EXERCISE COUNT) --- */}
         {activeTab === 'USERS' && (
              <div className="space-y-6 animate-fade-in">
                 <div className="flex justify-between items-center">
@@ -483,12 +599,20 @@ CREATE TRIGGER on_auth_user_created
                                     <th className="py-4 px-6">Função</th>
                                     <th className="py-4 px-6">Nível Atual</th>
                                     <th className="py-4 px-6">Verbos Descobertos</th>
+                                    <th className="py-4 px-6">Total Exercícios</th>
                                     <th className="py-4 px-6">Último Acesso</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {realUsers.map((user) => {
                                     const brain = user.brain || {};
+                                    // Count unique verbs found
+                                    const verbsCount = brain.verbHistory ? Object.keys(brain.verbHistory).length : 0;
+                                    // Count total exercises done (across all levels)
+                                    const totalExercises = brain.levelStats 
+                                        ? Object.values(brain.levelStats).reduce((acc: any, curr: any) => acc + curr.exercisesCount, 0)
+                                        : 0;
+
                                     return (
                                         <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                                             <td className="py-4 px-6">
@@ -506,7 +630,12 @@ CREATE TRIGGER on_auth_user_created
                                                 {brain.currentLevel || 'A1'}
                                             </td>
                                             <td className="py-4 px-6">
-                                                {brain.verbHistory ? Object.keys(brain.verbHistory).length : 0}
+                                                <div className="font-mono font-bold text-purple-600">{verbsCount}</div>
+                                                <div className="text-[10px] text-slate-400">Verbos Únicos</div>
+                                            </td>
+                                            <td className="py-4 px-6">
+                                                <div className="font-mono font-bold text-blue-600">{totalExercises}</div>
+                                                <div className="text-[10px] text-slate-400">Sessões Concluídas</div>
                                             </td>
                                             <td className="py-4 px-6 text-slate-500 text-xs">
                                                 {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
@@ -984,7 +1113,7 @@ CREATE TRIGGER on_auth_user_created
             </div>
         )}
 
-        {/* --- TAB: STORE MANAGEMENT (Keep existing) --- */}
+        {/* --- TAB: STORE MANAGEMENT --- */}
         {activeTab === 'STORE' && (
             <div className="space-y-6 animate-fade-in">
                 <div className="flex justify-between items-center">

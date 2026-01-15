@@ -106,12 +106,24 @@ export interface StoryChapter {
   chapterNumber: number;
   title: string;
   emoji: string; // Chapter Icon
-  textIt: string; // HTML with <b>verbs</b>
+  textIt: string; // Legacy field (Full Text)
   textPt: string;
-  summary: string; // Hidden summary for AI context continuity
-  userChoice?: string; // The choice user made at the end
+  summary: string; 
+  userChoice?: string; 
   targetVerbs: string[];
   date: number;
+  // NEW: 3-Act Structure
+  acts?: {
+      act1: { textIt: string; textPt: string };
+      act2: { 
+          textPreGap: string; 
+          correctVerb: string; 
+          distractors: string[]; 
+          textPostGap: string; 
+          textPt: string 
+      };
+      act3: { textIt: string; textPt: string };
+  };
 }
 
 export interface NovelProgress {
@@ -193,6 +205,12 @@ export interface Notification {
     read: boolean;
 }
 
+export interface UsageStats {
+    textQueries: number;
+    audioPlays: number;
+    imageGenerations: number;
+}
+
 export interface UserBrain {
   currentLevel: VerbLevel;
   levelStats: Record<VerbLevel, LevelStats>;
@@ -223,6 +241,9 @@ export interface UserBrain {
   
   // Notifications
   notifications: Notification[];
+
+  // Cost Tracking
+  usageStats: UsageStats;
 }
 
 export interface UserStats {

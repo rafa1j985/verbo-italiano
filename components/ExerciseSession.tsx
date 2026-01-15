@@ -162,7 +162,7 @@ const VoiceEnergyMonitor: React.FC<{ onEnergyFull: () => void, threshold: number
                         <span className={completed ? "text-amber-600 font-extrabold tracking-widest animate-pulse" : ""}>
                             {completed ? "BÔNUS LIBERADO!" : (isListening ? "Detectando Voz..." : "Toque no mic")}
                         </span>
-                        <span className={completed ? "text-amber-600" : ""}>{Math.round(energy)}%</span>
+                        <span className="text-xs">{Math.round(energy)}%</span>
                     </div>
                     <div className="h-2 bg-slate-200 rounded-full overflow-hidden relative">
                         <div 
@@ -263,8 +263,15 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
   const handlePlayAudio = async (text: string, id: string) => {
       // Allow re-playing even if 'playingAudio' is set, just debounce slightly
       if (playingAudio === id) return; 
+      
       setPlayingAudio(id);
       await playTextToSpeech(text);
+      
+      // Update Cost Stats
+      const newStats = { ...brain.usageStats };
+      newStats.audioPlays = (newStats.audioPlays || 0) + 1;
+      onUpdateBrain({ ...brain, usageStats: newStats });
+
       setPlayingAudio(null);
   };
 
@@ -393,6 +400,11 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       // WAIT FOR BOTH
       const [_, firstLesson] = await Promise.all([minWaitTime, contentPromise]);
       
+      // Track Text Generation Cost
+      const newStats = { ...brain.usageStats };
+      newStats.textQueries = (newStats.textQueries || 0) + 1;
+      onUpdateBrain({ ...brain, usageStats: newStats });
+
       loadLesson(firstLesson);
       setLoading(false);
       fillBuffer();
@@ -529,6 +541,12 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
           const recentVerbs = Object.keys(brain.verbHistory)
             .filter(v => (Date.now() - brain.verbHistory[v].lastSeen) < 24 * 60 * 60 * 1000);
           const fresh = await generateLesson(brain.currentLevel, progress, recentVerbs, brain.verbHistory, config);
+          
+          // Track Text Generation Cost (Lazy load)
+          const newStats = { ...brain.usageStats };
+          newStats.textQueries = (newStats.textQueries || 0) + 1;
+          onUpdateBrain({ ...brain, usageStats: newStats });
+
           nextData = fresh;
           fetchPromise = Promise.resolve();
       }
@@ -563,9 +581,14 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
       if (!sessionData || submitting) return;
       setSubmitting(true);
       const target = sessionData.practiceSentences[sentenceIdx];
+      
+      // Track AI Cost for Analysis
+      const newBrain = { ...brain };
+      newBrain.usageStats.textQueries = (newBrain.usageStats.textQueries || 0) + 1;
+
       const feedback = await analyzeSubmission(target.context, sessionData.verb, target.correctAnswer, practiceInput);
       setPracticeFeedback(feedback);
-      const newBrain = { ...brain };
+      
       if (feedback.isCorrect) {
           awardXP(config.economy.xpPractice);
           newBrain.sessionStreak += 1;
@@ -682,7 +705,8 @@ const ExerciseSession: React.FC<ExerciseSessionProps> = ({ onExit, brain, onUpda
           const conjugations = data.lesson.fullConjugation.map(cleanString);
           const conj = conjugations[idx];
           const fullPhrase = `${pronounLabel} ${conj}`;
-          prefetchAudio(fullPhrase);
+          
+          // Cost tracking handled in handlePlayAudio when button clicked
           return { verbInfinitive: data.verb, pronoun: pronounLabel, conjugation: conj, fullItalian: fullPhrase, ptTranslation: data.lesson.definition };
       });
       setDictationQueue(robustQueue); setDictationIndex(0); setDictationStep('LISTEN'); setDictationInput(''); setDictationFeedback(null);

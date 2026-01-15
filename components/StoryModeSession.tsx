@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserBrain, GlobalGameConfig, CharacterGender, CharacterArchetype } from '../types';
 import { generateStoryChapter, playTextToSpeech } from '../services/geminiService';
-import { BookOpen, Volume2, User, Briefcase, Feather, ChevronRight, Sparkles, Map, Loader2 } from 'lucide-react';
+import { BookOpen, Volume2, User, Briefcase, Feather, ChevronRight, Sparkles, Map, Loader2, ArrowDown, Edit3 } from 'lucide-react';
 
 interface StoryModeSessionProps {
   onExit: () => void;
@@ -11,7 +11,7 @@ interface StoryModeSessionProps {
   config: GlobalGameConfig;
 }
 
-type SessionPhase = 'LOADING' | 'SETUP_GENDER' | 'SETUP_ARCHETYPE' | 'READING' | 'CHOOSING';
+type SessionPhase = 'LOADING' | 'SETUP_GENDER' | 'SETUP_ARCHETYPE' | 'READING_ACT1' | 'READING_ACT2_CHALLENGE' | 'READING_ACT2_SOLVED' | 'READING_ACT3' | 'CHOOSING';
 
 const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUpdateBrain, config }) => {
   // State
@@ -22,16 +22,29 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
   const [gender, setGender] = useState<CharacterGender>('MALE');
   const [archetype, setArchetype] = useState<CharacterArchetype>('DETECTIVE');
   
-  // Content Data
+  // Content Data (New Structure)
   const [chapterData, setChapterData] = useState<{ 
       title: string; 
-      textIt: string; 
-      textPt: string; 
-      options: { text: string; action: string }[]; 
-      summary: string;
       emoji: string;
+      summary: string;
+      acts: {
+          act1: { textIt: string; textPt: string };
+          act2: { 
+              textPreGap: string; 
+              correctVerb: string; 
+              distractors: string[]; 
+              textPostGap: string; 
+              textPt: string 
+          };
+          act3: { textIt: string; textPt: string };
+      };
+      options: { text: string; action: string }[]; 
   } | null>(null);
   
+  // Act 2 Challenge State
+  const [challengeOptions, setChallengeOptions] = useState<string[]>([]);
+  const [challengeError, setChallengeError] = useState(false);
+
   const [targetVerbs, setTargetVerbs] = useState<string[]>([]);
 
   useEffect(() => {
@@ -53,12 +66,23 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
           const recentVerbs = allVerbs.sort((a, b) => brain.verbHistory[b].lastSeen - brain.verbHistory[a].lastSeen).slice(0, 5);
           setTargetVerbs(recentVerbs);
 
-          // 2. Generate
+          // 2. Generate (Uses new AI function)
           const data = await generateStoryChapter(g, a, chapterNum, summarySoFar, recentVerbs, brain.currentLevel);
           
-          if (data) {
+          if (data && data.acts) {
               setChapterData(data);
-              setPhase('READING');
+              
+              // Prepare Challenge Options (Shuffle)
+              const options = [data.acts.act2.correctVerb, ...data.acts.act2.distractors];
+              setChallengeOptions(options.sort(() => Math.random() - 0.5));
+              
+              // 3. Track Usage Cost (Text)
+              // NOTE: This updates state locally, but will be overwritten if user exits before saving?
+              // Ideally update happens on handleChoice to save everything at once, but tracking usage immediately is safer.
+              // Since we don't save immediately here, we'll bundle it into the final save or do a silent update if architecture allowed.
+              // For now, we add the stat update to the handleChoice flow to save DB writes.
+              
+              setPhase('READING_ACT1');
           } else {
               alert("O escritor teve um bloqueio criativo. Tente novamente.");
               onExit();
@@ -80,6 +104,19 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       generateNextChapter(gender, a, 1, "Início da jornada.");
   };
 
+  const handleChallengeSubmit = (option: string) => {
+      if (!chapterData) return;
+      if (option === chapterData.acts.act2.correctVerb) {
+          setPhase('READING_ACT2_SOLVED');
+          setChallengeError(false);
+          // Auto-advance to Act 3 after short delay to let user see filled gap
+          setTimeout(() => setPhase('READING_ACT3'), 1500);
+      } else {
+          setChallengeError(true);
+          setTimeout(() => setChallengeError(false), 800);
+      }
+  };
+
   const handleChoice = (option: { text: string; action: string }) => {
       if (!chapterData) return;
 
@@ -97,23 +134,30 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
           };
       }
 
-      // Add Chapter to History
+      // Add Chapter to History (Mapping new structure to storage format)
+      // Note: We're storing the FULL text concatenated for legacy compatibility if needed
+      // But preserving the structure in 'acts' is better. For now we follow the type definition.
       newBrain.novelData.chapters.push({
           chapterNumber: newBrain.novelData.currentChapter + 1,
           title: chapterData.title,
           emoji: chapterData.emoji,
-          textIt: chapterData.textIt,
-          textPt: chapterData.textPt,
+          textIt: `${chapterData.acts.act1.textIt} ${chapterData.acts.act2.textPreGap} ${chapterData.acts.act2.correctVerb} ${chapterData.acts.act2.textPostGap} ${chapterData.acts.act3.textIt}`,
+          textPt: `${chapterData.acts.act1.textPt} ... ${chapterData.acts.act3.textPt}`,
           summary: chapterData.summary,
           userChoice: option.text,
           targetVerbs: targetVerbs,
-          date: Date.now()
+          date: Date.now(),
+          acts: chapterData.acts
       });
 
       // Update State
       newBrain.novelData.currentChapter += 1;
       // Append new summary to plot summary
       newBrain.novelData.plotSummary += ` [Cap ${newBrain.novelData.currentChapter}]: ${chapterData.summary}. Decisão do usuário: ${option.action}.`;
+
+      // UPDATE COSTS
+      if (!newBrain.usageStats) newBrain.usageStats = { textQueries: 0, audioPlays: 0, imageGenerations: 0 };
+      newBrain.usageStats.textQueries += 1;
 
       onUpdateBrain(newBrain);
       onExit();
@@ -189,78 +233,158 @@ const StoryModeSession: React.FC<StoryModeSessionProps> = ({ onExit, brain, onUp
       );
   }
 
-  // --- RENDER: READING / CHOICE ---
-  if (chapterData && (phase === 'READING' || phase === 'CHOOSING')) {
+  // --- RENDER: MAIN STORY READER ---
+  if (chapterData) {
       const chapterNum = (brain.novelData?.currentChapter || 0) + 1;
+      const acts = chapterData.acts;
       
+      // Calculate Progress (1 = Act1, 2 = Act2, 3 = Act3)
+      let progress = 1;
+      if (['READING_ACT2_CHALLENGE', 'READING_ACT2_SOLVED'].includes(phase)) progress = 2;
+      if (['READING_ACT3', 'CHOOSING'].includes(phase)) progress = 3;
+
       return (
-          <div className="h-full bg-[#fdfbf7] flex flex-col overflow-hidden text-slate-800 animate-in fade-in duration-700">
+          <div className="h-full bg-[#fdfbf7] flex flex-col overflow-hidden text-slate-800 font-serif">
               {/* Header */}
-              <div className="p-4 border-b border-[#e5e0d8] flex justify-between items-center bg-[#fdfbf7] z-10 shadow-sm">
+              <div className="p-4 border-b border-[#e5e0d8] flex justify-between items-center bg-[#fdfbf7] z-10 shadow-sm font-sans">
                   <div className="flex items-center gap-2">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Capitolo {chapterNum}</span>
+                  </div>
+                  {/* Progress Indicators */}
+                  <div className="flex gap-2">
+                      {[1, 2, 3].map(i => (
+                          <div key={i} className={`h-1.5 w-8 rounded-full transition-all duration-500 ${i <= progress ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
+                      ))}
                   </div>
                   <button onClick={onExit} className="text-slate-400 hover:text-red-500 text-xs font-bold">SAIR</button>
               </div>
 
-              {/* Book Content */}
-              <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-2xl mx-auto w-full">
+              {/* Book Content - Scrollable Area */}
+              <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-2xl mx-auto w-full relative">
+                  
+                  {/* TITLE (Always Visible) */}
                   <div className="text-center mb-8">
-                      <div className="text-6xl mb-4 animate-bounce-slow">{chapterData.emoji}</div>
-                      <h1 className="text-3xl md:text-4xl font-serif font-bold text-slate-900 leading-tight mb-2">{chapterData.title}</h1>
+                      <div className="text-6xl mb-4">{chapterData.emoji}</div>
+                      <h1 className="text-3xl md:text-4xl font-bold text-slate-900 leading-tight mb-2">{chapterData.title}</h1>
                       <div className="w-16 h-1 bg-slate-800 mx-auto rounded-full opacity-20"></div>
                   </div>
 
-                  <div className="prose prose-lg prose-slate font-serif text-slate-700 leading-loose mb-8 first-letter:text-5xl first-letter:font-bold first-letter:text-slate-900 first-letter:float-left first-letter:mr-2">
-                      <p dangerouslySetInnerHTML={{ __html: chapterData.textIt }}></p>
+                  {/* ACT 1: SETTING */}
+                  <div className="mb-8 animate-in fade-in duration-700">
+                      <div className="flex justify-between items-start mb-2">
+                          <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-slate-400">Atto I</span>
+                          <button onClick={() => playTextToSpeech(acts.act1.textIt)} className="text-slate-400 hover:text-purple-600 transition-colors"><Volume2 size={16}/></button>
+                      </div>
+                      <p className="text-lg leading-loose text-slate-700 text-justify" dangerouslySetInnerHTML={{ __html: acts.act1.textIt }}></p>
                   </div>
 
-                  {/* Audio & Verbs */}
-                  <div className="flex justify-between items-center border-t border-[#e5e0d8] pt-6 mb-6">
-                      <button 
-                        onClick={() => playTextToSpeech(chapterData.textIt.replace(/<[^>]*>/g, ''))}
-                        className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors"
-                      >
-                          <Volume2 size={20} /> <span className="text-xs font-bold uppercase">Ouvir</span>
-                      </button>
-                      <div className="flex gap-1">
-                          {targetVerbs.map(v => <span key={v} className="px-2 py-1 bg-[#f0ede6] text-slate-500 text-[10px] uppercase font-bold rounded">{v}</span>)}
+                  {/* BUTTON TO ADVANCE TO ACT 2 */}
+                  {phase === 'READING_ACT1' && (
+                      <div className="text-center py-8">
+                          <button 
+                            onClick={() => setPhase('READING_ACT2_CHALLENGE')}
+                            className="bg-slate-900 text-white px-8 py-3 rounded-full font-sans font-bold hover:bg-slate-700 transition-all flex items-center gap-2 mx-auto animate-pulse"
+                          >
+                              Continuar <ArrowDown size={18} />
+                          </button>
                       </div>
-                  </div>
+                  )}
 
-                  {/* Translation Accordion */}
-                  <details className="group mb-12">
-                      <summary className="list-none flex items-center gap-2 text-xs font-bold text-slate-400 uppercase cursor-pointer hover:text-slate-600 transition-colors select-none">
-                          <Map size={14} /> Ver Tradução
-                      </summary>
-                      <div className="mt-4 p-4 bg-[#f0ede6] rounded-lg text-slate-600 italic text-sm border-l-4 border-slate-300">
-                          {chapterData.textPt}
+                  {/* ACT 2: CHALLENGE */}
+                  {(['READING_ACT2_CHALLENGE', 'READING_ACT2_SOLVED', 'READING_ACT3', 'CHOOSING'].includes(phase)) && (
+                      <div className="mb-8 animate-in slide-in-from-bottom-10 fade-in duration-700">
+                          <div className="flex justify-between items-start mb-2">
+                              <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-slate-400">Atto II: La Sfida</span>
+                          </div>
+                          
+                          <div className={`bg-white border-l-4 ${phase === 'READING_ACT2_CHALLENGE' ? 'border-amber-400' : 'border-emerald-500'} p-6 rounded-r-xl shadow-sm transition-all`}>
+                              <p className="text-lg leading-loose text-slate-800">
+                                  {acts.act2.textPreGap} 
+                                  
+                                  {/* THE GAP */}
+                                  <span className={`inline-block mx-2 px-3 py-1 rounded font-bold border-b-2 transition-all
+                                      ${phase === 'READING_ACT2_SOLVED' || phase === 'READING_ACT3' || phase === 'CHOOSING'
+                                          ? 'text-emerald-700 bg-emerald-50 border-emerald-300' 
+                                          : 'text-amber-700 bg-amber-50 border-amber-300 min-w-[100px] text-center'}
+                                  `}>
+                                      {phase === 'READING_ACT2_CHALLENGE' ? '_______' : acts.act2.correctVerb}
+                                  </span>
+
+                                  {(phase === 'READING_ACT2_SOLVED' || phase === 'READING_ACT3' || phase === 'CHOOSING') && (
+                                      <span className="animate-in fade-in">{acts.act2.textPostGap}</span>
+                                  )}
+                              </p>
+
+                              {/* OPTIONS */}
+                              {phase === 'READING_ACT2_CHALLENGE' && (
+                                  <div className="mt-6">
+                                      <p className="text-xs font-sans font-bold text-slate-400 uppercase mb-3 flex items-center gap-1">
+                                          <Edit3 size={12} /> Complete a frase:
+                                      </p>
+                                      <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 ${challengeError ? 'animate-shake' : ''}`}>
+                                          {challengeOptions.map((opt, idx) => (
+                                              <button 
+                                                  key={idx}
+                                                  onClick={() => handleChallengeSubmit(opt)}
+                                                  className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-sans font-bold py-3 rounded-lg transition-colors hover:border-amber-400"
+                                              >
+                                                  {opt}
+                                              </button>
+                                          ))}
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
                       </div>
-                  </details>
+                  )}
+
+                  {/* ACT 3: RESOLUTION */}
+                  {(['READING_ACT3', 'CHOOSING'].includes(phase)) && (
+                      <div className="mb-12 animate-in slide-in-from-bottom-10 fade-in duration-700">
+                          <div className="flex justify-between items-start mb-2">
+                              <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-slate-400">Atto III</span>
+                              <button onClick={() => playTextToSpeech(acts.act3.textIt)} className="text-slate-400 hover:text-purple-600 transition-colors"><Volume2 size={16}/></button>
+                          </div>
+                          <p className="text-lg leading-loose text-slate-700 text-justify" dangerouslySetInnerHTML={{ __html: acts.act3.textIt }}></p>
+                          
+                          {phase === 'READING_ACT3' && (
+                              <div className="text-center mt-8">
+                                  <button 
+                                    onClick={() => setPhase('CHOOSING')}
+                                    className="bg-slate-900 text-white px-8 py-3 rounded-full font-sans font-bold hover:bg-slate-700 transition-all flex items-center gap-2 mx-auto animate-pulse"
+                                  >
+                                      Tomar Decisão <ChevronRight size={18} />
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  )}
 
                   {/* DECISION POINT */}
-                  <div className="space-y-4 pb-12">
-                      <div className="flex items-center gap-2 mb-4">
-                          <Sparkles size={18} className="text-purple-500" />
-                          <h3 className="font-bold text-slate-900 uppercase text-sm tracking-widest">O que você faz agora?</h3>
+                  {phase === 'CHOOSING' && (
+                      <div className="space-y-4 pb-20 animate-in slide-in-from-bottom-10 fade-in duration-500">
+                          <div className="flex items-center gap-2 mb-4 justify-center">
+                              <Sparkles size={18} className="text-purple-500" />
+                              <h3 className="font-sans font-bold text-slate-900 uppercase text-sm tracking-widest">O que você faz agora?</h3>
+                          </div>
+                          
+                          {chapterData.options.map((opt, idx) => (
+                              <button
+                                  key={idx}
+                                  onClick={() => handleChoice(opt)}
+                                  className="w-full text-left p-5 rounded-xl border-2 border-[#e5e0d8] bg-white hover:border-purple-400 hover:shadow-lg transition-all group relative overflow-hidden"
+                              >
+                                  <div className="absolute inset-0 bg-purple-50 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                  <div className="relative z-10 flex justify-between items-center">
+                                      <span className="font-serif text-lg font-medium text-slate-800 group-hover:text-purple-800">
+                                          {opt.text}
+                                      </span>
+                                      <ChevronRight className="text-slate-300 group-hover:text-purple-500" />
+                                  </div>
+                              </button>
+                          ))}
                       </div>
-                      
-                      {chapterData.options.map((opt, idx) => (
-                          <button
-                              key={idx}
-                              onClick={() => handleChoice(opt)}
-                              className="w-full text-left p-5 rounded-xl border-2 border-[#e5e0d8] bg-white hover:border-purple-400 hover:shadow-lg transition-all group relative overflow-hidden"
-                          >
-                              <div className="absolute inset-0 bg-purple-50 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                              <div className="relative z-10 flex justify-between items-center">
-                                  <span className="font-serif text-lg font-medium text-slate-800 group-hover:text-purple-800">
-                                      {opt.text}
-                                  </span>
-                                  <ChevronRight className="text-slate-300 group-hover:text-purple-500" />
-                              </div>
-                          </button>
-                      ))}
-                  </div>
+                  )}
               </div>
           </div>
       );
