@@ -119,6 +119,14 @@ const MilestoneSession: React.FC<MilestoneSessionProps> = ({ onExit, brain, onUp
         date: Date.now(),
         score: finalScore
       });
+
+      // AWARD MEDAL ITEM TO INVENTORY
+      const medalId = `medal_tier_${targetTier}`;
+      if (!newBrain.inventory) newBrain.inventory = [];
+      if (!newBrain.inventory.includes(medalId)) {
+          newBrain.inventory.push(medalId);
+      }
+
     } else {
       // Set Cooldown
       newBrain.lastMilestoneFail = Date.now();

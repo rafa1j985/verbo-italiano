@@ -113,6 +113,53 @@ export const STORE_CATALOG: StoreItem[] = [
         isActive: true
     },
 
+    // --- MEDALS (NEW) ---
+    {
+        id: 'medal_tier_10',
+        name: 'Pietra Miliare X',
+        description: 'Conquistada ao dominar os primeiros 10 verbos.',
+        price: 0,
+        type: 'MEDAL',
+        asset: '🥉',
+        isActive: true
+    },
+    {
+        id: 'medal_tier_20',
+        name: 'Pietra Miliare XX',
+        description: 'Conquistada ao dominar 20 verbos.',
+        price: 0,
+        type: 'MEDAL',
+        asset: '🥈',
+        isActive: true
+    },
+    {
+        id: 'medal_tier_30',
+        name: 'Pietra Miliare XXX',
+        description: 'Conquistada ao dominar 30 verbos.',
+        price: 0,
+        type: 'MEDAL',
+        asset: '🥇',
+        isActive: true
+    },
+    {
+        id: 'medal_tier_40',
+        name: 'Pietra Miliare XL',
+        description: 'Conquistada ao dominar 40 verbos.',
+        price: 0,
+        type: 'MEDAL',
+        asset: '💎',
+        isActive: true
+    },
+    {
+        id: 'medal_tier_50',
+        name: 'Pietra Miliare L',
+        description: 'Conquistada ao dominar 50 verbos.',
+        price: 0,
+        type: 'MEDAL',
+        asset: '👑',
+        isActive: true
+    },
+
     // --- FLAGS (Assets are the symbol inside the flag) ---
     {
         id: 'flag_italia',
